@@ -1,10 +1,11 @@
-# NewAPI Elegant
+# NewAPI SYNC TOOL
+中文文档: [README.zh-CN.md](README.zh-CN.md)
 
 [![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/G3451V)
 
-Elegant NewAPI Sync Tool (Node.js + Express).
+NewAPI Sync Tool (Node.js + Express).
 
-Chinese README: [README.zh-CN.md](README.zh-CN.md)
+
 
 ## Requirements
 - Node.js 18+
