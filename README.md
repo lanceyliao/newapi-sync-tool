@@ -1,8 +1,10 @@
 # NewAPI Elegant
 
-[![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/<TEMPLATE_ID>)
+[![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/G3451V)
 
 Elegant NewAPI Sync Tool (Node.js + Express).
+
+Chinese README: [README.zh-CN.md](README.zh-CN.md)
 
 ## Requirements
 - Node.js 18+
@@ -45,7 +47,7 @@ docker compose up -d
 
 Button link format (replace with your template):
 ```
-[![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/<TEMPLATE_ID>)
+[![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/G3451V)
 ```
 
 ## PaaS notes

@@ -1,0 +1,56 @@
+apiVersion: zeabur.com/v1
+kind: Template
+metadata:
+  name: NewAPI Elegant
+spec:
+  description: Elegant NewAPI Sync Tool (Node.js + Express).
+  icon: https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/nodedotjs.svg
+  tags:
+    - Tool
+  variables:
+    - key: SECRET_KEY
+      type: PASSWORD
+      name: Secret Key
+      description: Encryption key for config.json (default newapi-sync-tool-2024).
+    - key: PORT
+      type: STRING
+      name: Port
+      description: Service port (default 8083).
+    - key: CONFIG_DIR
+      type: STRING
+      name: Config Directory
+      description: Directory for config.json and monitor-config.json (default /data).
+  readme: |-
+    # NewAPI Elegant
+    Elegant NewAPI Sync Tool (Node.js + Express).
+
+    ## Environment variables
+    - PORT: server port (default 8083)
+    - SECRET_KEY: encryption key for config.json
+    - CONFIG_DIR: directory for config.json and monitor-config.json (default /data)
+
+    ## Persistence
+    Mount a persistent volume to /data and set CONFIG_DIR=/data.
+  services:
+    - name: NewAPI Elegant
+      icon: https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/nodedotjs.svg
+      template: GIT
+      spec:
+        source:
+          source: GITHUB
+          repo: 1073551905
+          branch: main
+        ports:
+          - id: web
+            port: 8083
+            type: HTTP
+        volumes:
+          - id: data
+            dir: /data
+        env:
+          PORT:
+            default: ${PORT}
+          SECRET_KEY:
+            default: ${SECRET_KEY}
+          CONFIG_DIR:
+            default: ${CONFIG_DIR}
