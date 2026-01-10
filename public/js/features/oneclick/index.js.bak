@@ -1,0 +1,725 @@
+﻿/**
+ * 涓€閿洿鏂版ā鍧楋紙Job 妯″紡 + 瀹炴椂杩涘害锛? */
+import { state, setOps } from '../../core/state.js';
+import {
+  startOneClickUpdateJob,
+  startOneClickUpdateJobFromPreview,
+  getOneClickUpdateJob,
+  cancelOneClickUpdateJob
+} from '../../api/sync.js';
+import { $ } from '../../ui/dom.js';
+import { addLog } from '../../ui/dom.js';
+import { notifications } from '../../ui/notifications.js';
+import { progress } from '../../ui/progress.js';
+import { rulesManager } from '../../rules/index.js';
+
+let activeJobId = null;
+let activeJobCursor = 0;
+let pollTimer = null;
+let lastPreviewJobId = null;
+let previewMappings = []; // 瀛樺偍棰勮缁撴灉锛岀敤浜庨€夋嫨鍜屾墽琛?let selectedMappingIds = new Set(); // 瀛樺偍閫変腑鐨勬槧灏処D
+
+/**
+ * 鑾峰彇褰撳墠鐢ㄦ埛瑙勫垯
+ */
+const getUserRules = () => {
+  return {
+    nameMatch: rulesManager.nameMatchRules || [],
+    merge: rulesManager.mergeRules || [],
+    custom: rulesManager.customRules || []
+  };
+};
+
+const getOneClickOptions = () => {
+  const concurrency = Number($('oneClickConcurrency')?.value || 4);
+  const onlyEnabled = Boolean($('oneClickOnlyEnabled')?.checked);
+  const forceRefresh = Boolean($('oneClickForceRefresh')?.checked);
+  const debug = Boolean($('oneClickVerboseLog')?.checked);
+
+  // 鑾峰彇鐢ㄦ埛瑙勫垯
+  const rules = getUserRules();
+  const totalRules = rules.nameMatch.length + rules.merge.length + rules.custom.length;
+
+  if (totalRules > 0) {
+    console.log(`馃搵 涓€閿洿鏂板皢浣跨敤 ${totalRules} 鏉＄敤鎴疯鍒檂);
+  }
+
+  return {
+    concurrency,
+    onlyEnabled,
+    forceRefresh,
+    debug,
+    rules  // 浼犻€掔敤鎴疯鍒?  };
+};
+
+const getSelectedChannelIdsOrNull = () => {
+  const selected = setOps.getChannelsArray();
+  return selected.length > 0 ? selected : null;
+};
+
+const setJobControls = (running) => {
+  const previewBtn = $('previewOneClickUpdateBtn');
+  const executeBtn = $('executeOneClickUpdateBtn');
+  const cancelBtn = $('cancelOneClickUpdateBtn');
+
+  if (previewBtn) previewBtn.disabled = running;
+  if (cancelBtn) cancelBtn.disabled = !running;
+
+  // 鎵ц鎸夐挳锛氬彧鏈夊湪棰勮瀹屾垚涓斾笉鍦ㄨ繍琛屾椂鍙敤
+  if (executeBtn) executeBtn.disabled = running || !lastPreviewJobId;
+};
+
+const resetJobState = () => {
+  activeJobId = null;
+  activeJobCursor = 0;
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+};
+
+const appendJobLogs = (logs) => {
+  if (!Array.isArray(logs) || logs.length === 0) return;
+  for (const entry of logs) {
+    const date = entry?.ts ? new Date(entry.ts) : null;
+    addLog('oneClickUpdateLogs', entry?.msg ?? '', entry?.type ?? '', date);
+  }
+};
+
+const updateProgressUI = (progressData) => {
+  const current = Number(progressData?.current || 0);
+  const total = Number(progressData?.total || 0);
+  const percent = Number(progressData?.percent || 0);
+  const channelName = progressData?.channelName ? `锛?{progressData.channelName}锛塦 : '';
+  const text = total > 0
+    ? `${current}/${total} ${channelName}`
+    : '姝ｅ湪鍒嗘瀽...';
+
+  progress.update('oneClickUpdateProgressFill', 'oneClickUpdateProgressText', percent, text);
+};
+
+const renderResults = (results) => {
+  const resultsContainer = $('oneClickUpdateResults');
+  if (resultsContainer) resultsContainer.style.display = 'block';
+
+  const scanned = $('scannedChannelsCount');
+  const broken = $('brokenMappingsCount');
+  const fixable = $('fixableMappingsCount');
+
+  if (scanned) scanned.textContent = `鎵弿: ${results?.scannedChannels || 0}`;
+  if (broken) broken.textContent = `澶辨晥: ${(results?.brokenMappings && results.brokenMappings.length) || 0}`;
+  if (fixable) fixable.textContent = `鍙慨澶? ${(results?.newMappings && results.newMappings.length) || 0}`;
+
+  renderBrokenMappings(results?.brokenMappings || []);
+  renderNewMappings(results?.newMappings || []);
+};
+
+const escapeHtml = (value) => {
+  return String(value ?? '').replace(/[&<>"']/g, (ch) => {
+    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    return map[ch] || ch;
+  });
+};
+
+const getChannelBadgeText = (mapping) => {
+  const id = mapping?.channelId != null ? String(mapping.channelId) : '';
+  const name = mapping?.channelName != null ? String(mapping.channelName) : '';
+  if (name && id) return `${name} (#${id})`;
+  if (name) return name;
+  if (id) return `娓犻亾 #${id}`;
+  return '';
+};
+
+const renderChannelMeta = (mapping) => {
+  const text = getChannelBadgeText(mapping);
+  if (!text) return '';
+  return `
+    <div class="mapping-meta">
+      <span class="channel-badge">${escapeHtml(text)}</span>
+    </div>
+  `;
+};
+
+const pollJobStatus = async () => {
+  if (!activeJobId) return;
+
+  try {
+    const resp = await getOneClickUpdateJob(activeJobId, activeJobCursor);
+    if (!resp?.success) {
+      throw new Error(resp?.message || '鑾峰彇浠诲姟鐘舵€佸け璐?);
+    }
+
+    const job = resp.job || {};
+    appendJobLogs(resp.logs || []);
+    activeJobCursor = resp.nextCursor || activeJobCursor;
+
+    updateProgressUI(job.progress);
+
+    if (job.status === 'running') {
+      if (job.cancelled) {
+        const current = Number(job.progress?.current || 0);
+        const total = Number(job.progress?.total || 0);
+        const percent = Number(job.progress?.percent || 0);
+        const channelName = job.progress?.channelName ? `锛?{job.progress.channelName}锛塦 : '';
+        const text = total > 0
+          ? `姝ｅ湪鍋滄... ${current}/${total} ${channelName}`
+          : '姝ｅ湪鍋滄...';
+        progress.update('oneClickUpdateProgressFill', 'oneClickUpdateProgressText', percent, text);
+      }
+      pollTimer = setTimeout(pollJobStatus, 600);
+      return;
+    }
+
+    if (job.status === 'completed') {
+      progress.complete('oneClickUpdateProgressFill', 'oneClickUpdateProgressText', '瀹屾垚!');
+      if (job.results) {
+        renderResults(job.results);
+      }
+      if (job.type === 'preview') {
+        lastPreviewJobId = job.id;
+      }
+      setJobControls(false);
+      resetJobState();
+      notifications.success(job.type === 'preview' ? '棰勮瀹屾垚' : '鏇存柊瀹屾垚');
+      return;
+    }
+
+    if (job.status === 'cancelled') {
+      progress.fail('oneClickUpdateProgressFill', 'oneClickUpdateProgressText', '宸插仠姝?);
+      setJobControls(false);
+      resetJobState();
+      notifications.warning('宸插仠姝?);
+      return;
+    }
+
+    progress.fail('oneClickUpdateProgressFill', 'oneClickUpdateProgressText', '澶辫触');
+    setJobControls(false);
+    resetJobState();
+    notifications.error(job.message || '浠诲姟澶辫触');
+  } catch (error) {
+    setJobControls(false);
+    resetJobState();
+    progress.fail('oneClickUpdateProgressFill', 'oneClickUpdateProgressText', '澶辫触');
+    addLog('oneClickUpdateLogs', `鉂?鑾峰彇浠诲姟鐘舵€佸け璐? ${error.message}`, 'error');
+    notifications.error(`浠诲姟澶辫触: ${error.message}`);
+  }
+};
+
+const startJob = async ({ dryRun, selectedMappings = null }) => {
+  const progressContainer = $('oneClickUpdateProgress');
+  const resultsContainer = $('oneClickUpdateResults');
+  const logsContainer = $('oneClickUpdateLogs');
+
+  if (progressContainer) progressContainer.style.display = 'block';
+  if (resultsContainer) resultsContainer.style.display = 'none';
+  if (logsContainer) {
+    logsContainer.style.display = 'block';
+    logsContainer.innerHTML = '';
+  }
+
+  resetJobState();
+  setJobControls(true);
+
+  const options = getOneClickOptions();
+  const channelIds = getSelectedChannelIdsOrNull();
+
+  // 鏄剧ず瑙勫垯淇℃伅
+  const rulesCount = (options.rules?.nameMatch?.length || 0) +
+                    (options.rules?.merge?.length || 0) +
+                    (options.rules?.custom?.length || 0);
+
+  progress.start('oneClickUpdateProgressFill', 'oneClickUpdateProgressText', dryRun ? '姝ｅ湪鍒嗘瀽...' : '姝ｅ湪鏇存柊...');
+
+  if (rulesCount > 0) {
+    addLog('oneClickUpdateLogs', `馃搵 浣跨敤 ${rulesCount} 鏉＄敤鎴疯鍒?(鍚嶇О鍖归厤: ${options.rules?.nameMatch?.length || 0}, 鍚堝苟: ${options.rules?.merge?.length || 0}, 鑷畾涔? ${options.rules?.custom?.length || 0})`);
+  } else {
+    addLog('oneClickUpdateLogs', '鈿狅笍 鏈厤缃敤鎴疯鍒欙紝灏嗕娇鐢ㄦ櫤鑳藉尮閰嶇畻娉?);
+  }
+
+  addLog('oneClickUpdateLogs', dryRun ? '馃攳 鍚姩棰勮浠诲姟...' : '鈿?鍩轰簬棰勮缁撴灉鍚姩鏇存柊浠诲姟...');
+
+  const result = dryRun
+    ? await startOneClickUpdateJob(channelIds, true, options)
+    : await startOneClickUpdateJobFromPreview(channelIds, lastPreviewJobId, options, selectedMappings);
+  if (!result?.success || !result.jobId) {
+    setJobControls(false);
+    throw new Error(result?.message || '鍚姩浠诲姟澶辫触');
+  }
+
+  activeJobId = result.jobId;
+  activeJobCursor = 0;
+
+  pollTimer = setTimeout(pollJobStatus, 200);
+};
+
+/**
+ * 棰勮涓€閿洿鏂? */
+export const previewUpdate = async () => {
+  try {
+    lastPreviewJobId = null;
+    const executeBtn = $('executeOneClickUpdateBtn');
+    if (executeBtn) executeBtn.disabled = true;
+
+    await startJob({ dryRun: true });
+    return { success: true };
+  } catch (error) {
+    progress.fail('oneClickUpdateProgressFill', 'oneClickUpdateProgressText', '鍒嗘瀽澶辫触');
+    addLog('oneClickUpdateLogs', `鉂?棰勮澶辫触: ${error.message}`, 'error');
+    notifications.error(`棰勮澶辫触: ${error.message}`);
+    return { success: false, message: error.message };
+  }
+};
+
+/**
+ * 鎵ц涓€閿洿鏂帮紙鍙洿鏂伴€変腑鐨勬槧灏勶級
+ */
+export const executeUpdate = async () => {
+  try {
+    if (!lastPreviewJobId) {
+      notifications.warning('璇峰厛瀹屾垚棰勮鍒嗘瀽');
+      return { success: false, message: '璇峰厛瀹屾垚棰勮鍒嗘瀽' };
+    }
+
+    const selectedMappings = getSelectedMappings();
+    if (selectedMappings.length === 0) {
+      notifications.warning('璇疯嚦灏戦€夋嫨涓€涓槧灏?);
+      return { success: false, message: '璇疯嚦灏戦€夋嫨涓€涓槧灏? };
+    }
+
+    addLog('oneClickUpdateLogs', `馃搵 灏嗘洿鏂?${selectedMappings.length} 涓€変腑鐨勬槧灏刞);
+
+    await startJob({ dryRun: false, selectedMappings });
+    return { success: true };
+  } catch (error) {
+    progress.fail('oneClickUpdateProgressFill', 'oneClickUpdateProgressText', '鏇存柊澶辫触');
+    addLog('oneClickUpdateLogs', `鉂?鏇存柊澶辫触: ${error.message}`, 'error');
+    notifications.error(`鏇存柊澶辫触: ${error.message}`);
+    return { success: false, message: error.message };
+  }
+};
+
+export const cancelActiveJob = async () => {
+  if (!activeJobId) return;
+  try {
+    await cancelOneClickUpdateJob(activeJobId);
+    const cancelBtn = $('cancelOneClickUpdateBtn');
+    if (cancelBtn) cancelBtn.disabled = true;
+    addLog('oneClickUpdateLogs', '鈴癸笍 宸茶姹傚仠姝紝姝ｅ湪鏀跺熬...', 'warning');
+  } catch (error) {
+    addLog('oneClickUpdateLogs', `鉂?鍋滄澶辫触: ${error.message}`, 'error');
+  }
+};
+
+/**
+ * 娓叉煋澶辨晥鏄犲皠鍒楄〃
+ */
+const renderBrokenMappings = (brokenMappings) => {
+  const container = $('brokenMappingsList');
+  if (!container) return;
+
+  if (brokenMappings.length === 0) {
+    container.innerHTML = '<div class="empty-state">娌℃湁鍙戠幇澶辨晥鐨勬槧灏?/div>';
+    return;
+  }
+
+  container.innerHTML = brokenMappings.map(mapping => `
+    <div class="mapping-item warning">
+      ${renderChannelMeta(mapping)}
+      <div class="mapping-info">
+        <span class="model-name">${escapeHtml(mapping.originalModel || mapping.standardName || '')}</span>
+        <i class="fas fa-arrow-right"></i>
+        <span class="target-name">${escapeHtml(mapping.expectedModel || mapping.actualName || '')}</span>
+      </div>
+      <div class="mapping-reason">${escapeHtml(mapping.reason || '妯″瀷鍚嶇О鍙樻洿')}</div>
+    </div>
+  `).join('');
+};
+
+/**
+ * 鐢熸垚鏄犲皠鐨勫敮涓€ID
+ */
+const getMappingId = (mapping, index) => {
+  return `${mapping.channelId || 'unknown'}_${mapping.standardName || ''}_${index}`;
+};
+
+/**
+ * 鏇存柊宸查€夋暟閲忔樉绀? */
+const updateSelectedCount = () => {
+  const countEl = $('selectedMappingsCount');
+  if (countEl) {
+    countEl.textContent = `宸查€? ${selectedMappingIds.size}`;
+  }
+  // 鏇存柊鎵ц鎸夐挳鐘舵€?  const executeBtn = $('executeOneClickUpdateBtn');
+  if (executeBtn) {
+    executeBtn.disabled = selectedMappingIds.size === 0 || activeJobId !== null;
+  }
+};
+
+/**
+ * 鍒囨崲鏄犲皠閫夋嫨鐘舵€? */
+const toggleMappingSelection = (mappingId, checked) => {
+  if (checked) {
+    selectedMappingIds.add(mappingId);
+  } else {
+    selectedMappingIds.delete(mappingId);
+  }
+  updateSelectedCount();
+};
+
+/**
+ * 鍏ㄩ€夋槧灏? */
+export const selectAllMappings = () => {
+  previewMappings.forEach((mapping, index) => {
+    const id = getMappingId(mapping, index);
+    selectedMappingIds.add(id);
+    const checkbox = document.querySelector(`input[data-mapping-id="${id}"]`);
+    if (checkbox) checkbox.checked = true;
+  });
+  updateSelectedCount();
+};
+
+/**
+ * 鍙栨秷鍏ㄩ€? */
+export const deselectAllMappings = () => {
+  selectedMappingIds.clear();
+  document.querySelectorAll('.mapping-checkbox').forEach(cb => cb.checked = false);
+  updateSelectedCount();
+};
+
+/**
+ * 浠呴€夋嫨楂樼疆淇″害鏄犲皠
+ */
+export const selectHighConfidenceOnly = () => {
+  selectedMappingIds.clear();
+  previewMappings.forEach((mapping, index) => {
+    const confidence = typeof mapping.confidence === 'number' ? mapping.confidence :
+                       (mapping.confidence === 'high' ? 95 : mapping.confidence === 'medium' ? 80 : 60);
+    const id = getMappingId(mapping, index);
+    const checkbox = document.querySelector(`input[data-mapping-id="${id}"]`);
+    if (confidence >= 90) {
+      selectedMappingIds.add(id);
+      if (checkbox) checkbox.checked = true;
+    } else {
+      if (checkbox) checkbox.checked = false;
+    }
+  });
+  updateSelectedCount();
+};
+
+/**
+ * 鑾峰彇閫変腑鐨勬槧灏勫垪琛? */
+export const getSelectedMappings = () => {
+  return previewMappings.filter((mapping, index) => {
+    const id = getMappingId(mapping, index);
+    return selectedMappingIds.has(id);
+  });
+};
+
+/**
+ * 浜ゆ崲鏄犲皠鏂瑰悜锛坰tandardName <-> actualName锛? */
+const swapMappingDirection = (mappingId) => {
+  const index = previewMappings.findIndex((m, i) => getMappingId(m, i) === mappingId);
+  if (index === -1) {
+    console.warn('鏈壘鍒版槧灏?', mappingId);
+    return;
+  }
+
+  const mapping = previewMappings[index];
+  const oldStandardName = mapping.standardName;
+  const oldActualName = mapping.actualName;
+
+  // 妫€鏌ユ槸鍚︿负绌?  if (!oldStandardName || !oldActualName) {
+    notifications.warning('鏄犲皠鏁版嵁涓嶅畬鏁达紝鏃犳硶浜ゆ崲');
+    return;
+  }
+
+  // 浜ゆ崲鍊?  mapping.standardName = oldActualName;
+  mapping.actualName = oldStandardName;
+
+  // 閲嶆柊璁＄畻鏂扮殑 mappingId
+  const newMappingId = getMappingId(mapping, index);
+
+  // 鏇存柊 DOM
+  const item = document.querySelector(`.mapping-item[data-mapping-id="${mappingId}"]`);
+  if (item) {
+    const modelName = item.querySelector('.model-name');
+    const targetName = item.querySelector('.target-name');
+    if (modelName && targetName) {
+      // 浜ゆ崲鏄剧ず鏂囨湰
+      const tempText = modelName.textContent;
+      modelName.textContent = targetName.textContent;
+      modelName.title = targetName.textContent;
+      targetName.textContent = tempText;
+      targetName.title = tempText;
+
+      // 鏇存柊 data-attributes
+      item.dataset.mappingId = newMappingId;
+      item.dataset.standard = mapping.standardName;
+      item.dataset.actual = mapping.actualName;
+
+      // 鏇存柊 checkbox 鐨?data-mapping-id
+      const checkbox = item.querySelector('.mapping-checkbox');
+      if (checkbox) {
+        checkbox.dataset.mappingId = newMappingId;
+      }
+
+      // 鏇存柊鎸夐挳鐨?data-mapping-id
+      const swapBtn = item.querySelector('.btn-swap');
+      const addBtn = item.querySelector('.btn-add');
+      if (swapBtn) swapBtn.dataset.mappingId = newMappingId;
+      if (addBtn) addBtn.dataset.mappingId = newMappingId;
+
+      // 娣诲姞鍔ㄧ敾鏁堟灉
+      item.style.transition = 'transform 0.2s ease';
+      item.style.transform = 'scale(0.98)';
+      setTimeout(() => {
+        item.style.transform = 'scale(1)';
+      }, 100);
+    }
+  }
+
+  // 鏇存柊 selectedMappingIds
+  if (selectedMappingIds.has(mappingId)) {
+    selectedMappingIds.delete(mappingId);
+    selectedMappingIds.add(newMappingId);
+  }
+
+  notifications.success('宸蹭氦鎹㈡槧灏勬柟鍚?);
+};
+
+/**
+ * 娣诲姞鏄犲皠鍒拌嚜瀹氫箟鏄犲皠琛? */
+const addMappingToCustom = (mappingId) => {
+  const index = previewMappings.findIndex((m, i) => getMappingId(m, i) === mappingId);
+  if (index === -1) {
+    console.warn('鏈壘鍒版槧灏?', mappingId);
+    return;
+  }
+
+  const mapping = previewMappings[index];
+  const standardName = mapping.standardName;
+  const actualName = mapping.actualName;
+
+  if (!standardName || !actualName) {
+    notifications.error('鏄犲皠鏁版嵁涓嶅畬鏁?);
+    return;
+  }
+
+  // 浣跨敤 mappingModule 娣诲姞鏄犲皠
+  if (window.mappingModule && typeof window.mappingModule.addMapping === 'function') {
+    const success = window.mappingModule.addMapping(standardName, actualName);
+    if (success) {
+      notifications.success(`宸叉坊鍔犳槧灏? ${standardName} 鈫?${actualName}`);
+    } else {
+      notifications.error('娣诲姞鏄犲皠澶辫触');
+    }
+  } else {
+    console.error('mappingModule 鏈姞杞芥垨涓嶆敮鎸?addMapping 鏂规硶');
+    notifications.error('娣诲姞鏄犲皠澶辫触锛氱郴缁熸ā鍧楁湭鍔犺浇');
+  }
+};
+
+/**
+ * 娓叉煋寤鸿淇鍒楄〃锛堜紭鍖栫増锛氭寜缃俊搴﹀垎绾у睍绀猴紝甯﹂€夋嫨鍔熻兘锛? */
+const renderNewMappings = (newMappings) => {
+  const container = $('newMappingsList');
+  if (!container) return;
+
+  // 瀛樺偍鏄犲皠鏁版嵁
+  previewMappings = newMappings;
+  selectedMappingIds.clear();
+
+  if (newMappings.length === 0) {
+    container.innerHTML = '<div class="empty-state">娌℃湁闇€瑕佷慨澶嶇殑鏄犲皠</div>';
+    updateSelectedCount();
+    return;
+  }
+
+  // 榛樿閫変腑楂樼疆淇″害鐨勬槧灏?  newMappings.forEach((mapping, index) => {
+    const confidence = typeof mapping.confidence === 'number' ? mapping.confidence :
+                       (mapping.confidence === 'high' ? 95 : mapping.confidence === 'medium' ? 80 : 60);
+    if (confidence >= 90) {
+      selectedMappingIds.add(getMappingId(mapping, index));
+    }
+  });
+
+  // 鎸夌疆淇″害鍒嗙粍
+  const highConfidence = newMappings.map((m, i) => ({ ...m, _index: i })).filter(m => {
+    const conf = typeof m.confidence === 'number' ? m.confidence : (m.confidence === 'high' ? 95 : m.confidence === 'medium' ? 80 : 60);
+    return conf >= 90;
+  });
+  const mediumConfidence = newMappings.map((m, i) => ({ ...m, _index: i })).filter(m => {
+    const conf = typeof m.confidence === 'number' ? m.confidence : (m.confidence === 'high' ? 95 : m.confidence === 'medium' ? 80 : 60);
+    return conf >= 70 && conf < 90;
+  });
+  const lowConfidence = newMappings.map((m, i) => ({ ...m, _index: i })).filter(m => {
+    const conf = typeof m.confidence === 'number' ? m.confidence : (m.confidence === 'high' ? 95 : m.confidence === 'medium' ? 80 : 60);
+    return conf < 70;
+  });
+
+  // 鎸夋笭閬撳垎缁勭殑杈呭姪鍑芥暟
+  const groupByChannel = (mappings) => {
+    const groups = new Map();
+    for (const mapping of mappings) {
+      const key = mapping.channelId || 'unknown';
+      if (!groups.has(key)) {
+        groups.set(key, {
+          channelId: mapping.channelId,
+          channelName: mapping.channelName || `娓犻亾 #${mapping.channelId}`,
+          mappings: []
+        });
+      }
+      groups.get(key).mappings.push(mapping);
+    }
+    return Array.from(groups.values());
+  };
+
+  // 娓叉煋鍗曚釜鏄犲皠椤癸紙甯heckbox鍜屾搷浣滄寜閽級
+  const renderMappingItem = (mapping, confidenceClass) => {
+    const confidence = typeof mapping.confidence === 'number' ? mapping.confidence :
+                       (mapping.confidence === 'high' ? 95 : mapping.confidence === 'medium' ? 80 : 60);
+    const mappingId = getMappingId(mapping, mapping._index);
+    const isChecked = selectedMappingIds.has(mappingId) ? 'checked' : '';
+    const standardName = escapeHtml(mapping.standardName || '');
+    const actualName = escapeHtml(mapping.actualName || '');
+
+    return `
+      <div class="mapping-item ${confidenceClass}" data-mapping-id="${mappingId}" data-standard="${standardName}" data-actual="${actualName}" data-channel-id="${mapping.channelId || ''}">
+        <div class="mapping-select">
+          <input type="checkbox" class="mapping-checkbox" data-mapping-id="${mappingId}" ${isChecked}>
+        </div>
+        <div class="mapping-content">
+          <div class="mapping-info">
+            <span class="model-name" title="${standardName}">${standardName}</span>
+            <i class="fas fa-arrow-right"></i>
+            <span class="target-name" title="${actualName}">${actualName}</span>
+          </div>
+          <div class="mapping-meta-row">
+            <div class="mapping-confidence">
+              <span class="confidence-label">缃俊搴?</span>
+              <div class="confidence-bar">
+                <div class="confidence-fill ${confidenceClass}" style="width: ${Math.max(0, Math.min(100, confidence))}%"></div>
+              </div>
+              <span class="confidence-value">${Math.round(confidence)}%</span>
+            </div>
+            <div class="mapping-method">鏂规硶: ${escapeHtml(mapping.method || '鏅鸿兘鍖归厤')}</div>
+          </div>
+          <div class="mapping-actions">
+            <button class="btn-icon btn-swap" data-mapping-id="${mappingId}" title="浜ゆ崲鏄犲皠鏂瑰悜锛堢敤鏂板悕瀛椾綔涓烘簮锛?>
+              <i class="fas fa-exchange-alt"></i>
+            </button>
+            <button class="btn-icon btn-add" data-mapping-id="${mappingId}" title="娣诲姞鍒拌嚜瀹氫箟鏄犲皠">
+              <i class="fas fa-plus"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  };
+
+  // 娓叉煋鍒嗙粍
+  const renderGroup = (title, icon, mappings, confidenceClass, defaultExpanded = true) => {
+    if (mappings.length === 0) return '';
+
+    const channelGroups = groupByChannel(mappings);
+    const expandedClass = defaultExpanded ? 'expanded' : '';
+
+    return `
+      <div class="confidence-group ${confidenceClass} ${expandedClass}">
+        <div class="confidence-group-header" onclick="this.parentElement.classList.toggle('expanded')">
+          <span class="group-icon"><i class="fas ${icon}"></i></span>
+          <span class="group-title">${title}</span>
+          <span class="group-count">${mappings.length} 涓?/span>
+          <span class="expand-icon"><i class="fas fa-chevron-down"></i></span>
+        </div>
+        <div class="confidence-group-content">
+          ${channelGroups.map(group => `
+            <div class="channel-group">
+              <div class="channel-group-header">
+                <span class="channel-badge">${escapeHtml(group.channelName)} (#${group.channelId})</span>
+                <span class="channel-count">${group.mappings.length} 涓槧灏?/span>
+              </div>
+              <div class="channel-mappings">
+                ${group.mappings.map(m => renderMappingItem(m, confidenceClass)).join('')}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  };
+
+  container.innerHTML = `
+    ${renderGroup('楂樼疆淇″害', 'fa-check-circle', highConfidence, 'high-confidence', true)}
+    ${renderGroup('涓疆淇″害', 'fa-exclamation-circle', mediumConfidence, 'medium-confidence', true)}
+    ${renderGroup('浣庣疆淇″害锛堝缓璁汉宸ョ‘璁わ級', 'fa-question-circle', lowConfidence, 'low-confidence', false)}
+  `;
+
+  // 缁戝畾checkbox浜嬩欢
+  container.querySelectorAll('.mapping-checkbox').forEach(checkbox => {
+    checkbox.addEventListener('change', (e) => {
+      toggleMappingSelection(e.target.dataset.mappingId, e.target.checked);
+    });
+  });
+
+  // 缁戝畾浜ゆ崲鎸夐挳浜嬩欢
+  container.querySelectorAll('.btn-swap').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const mappingId = btn.dataset.mappingId;
+      swapMappingDirection(mappingId);
+    });
+  });
+
+  // 缁戝畾娣诲姞鍒版槧灏勬寜閽簨浠?  container.querySelectorAll('.btn-add').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const mappingId = btn.dataset.mappingId;
+      addMappingToCustom(mappingId);
+    });
+  });
+
+  updateSelectedCount();
+};
+
+/**
+ * 鎵撳紑涓€閿洿鏂板脊绐? */
+export const openModal = () => {
+  const modal = $('oneClickUpdateModal');
+  if (modal) {
+    modal.classList.add('show');
+    modal.classList.remove('active');
+
+    const resultsContainer = $('oneClickUpdateResults');
+    if (resultsContainer) resultsContainer.style.display = 'none';
+
+    const logsContainer = $('oneClickUpdateLogs');
+    if (logsContainer) logsContainer.style.display = 'none';
+
+    lastPreviewJobId = null;
+    setJobControls(false);
+  }
+};
+
+/**
+ * 鍏抽棴涓€閿洿鏂板脊绐? */
+export const closeModal = () => {
+  cancelActiveJob();
+  const modal = $('oneClickUpdateModal');
+  if (modal) {
+    modal.classList.remove('show');
+    modal.classList.remove('active');
+  }
+};
+
+export default {
+  previewUpdate,
+  executeUpdate,
+  cancelActiveJob,
+  openModal,
+  closeModal,
+  selectAllMappings,
+  deselectAllMappings,
+  selectHighConfidenceOnly,
+  getSelectedMappings
+};

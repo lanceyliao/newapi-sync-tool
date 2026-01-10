@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NewAPI 同步工具 v4.0</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-layout">
+        <!-- 顶部进度条（非阻塞加载） -->
+        <div id="topProgressBar" class="top-progress-bar hidden">
+            <div class="progress-fill" id="topProgressFill"></div>
+        </div>
+        <div id="modelCacheProgressBar" class="top-progress-bar hidden model-cache-progress">
+            <div class="progress-fill" id="modelCacheProgressFill"></div>
+        </div>
+
+        <!-- 全局加载遮罩（仅首次加载使用） -->
+        <div id="globalLoadingOverlay" class="loading-overlay" style="display: none;">
+            <div class="loading-content">
+                <div class="loading-spinner-large"></div>
+                <div class="loading-text" id="globalLoadingText">正在加载...</div>
+                <div class="loading-progress">
+                    <div class="loading-progress-bar" id="globalLoadingProgress"></div>
+                </div>
+                <div class="loading-detail" id="globalLoadingDetail"></div>
+            </div>
+        </div>
+
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">N</div>
+                    <span>NewAPI Sync</span>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active" id="navDashboard" data-page="dashboard">
+                    <i class="fas fa-home"></i>
+                    <span>仪表盘</span>
+                </a>
+                <a href="#" class="nav-item" id="navChannels" data-page="channels">
+                    <i class="fas fa-server"></i>
+                    <span>渠道管理</span>
+                </a>
+                <a href="#" class="nav-item" id="navMapping" data-page="mapping">
+                    <i class="fas fa-code-branch"></i>
+                    <span>模型映射</span>
+                </a>
+                <a href="#" class="nav-item" id="navSync" data-page="sync">
+                    <i class="fas fa-sync-alt"></i>
+                    <span>同步操作</span>
+                </a>
+                <a href="#" class="nav-item" id="navSettings" data-page="settings">
+                    <i class="fas fa-cog"></i>
+                    <span>系统设置</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="connection-status" id="sidebarStatus">
+                    <div class="status-dot offline"></div>
+                    <span>未连接</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <!-- 顶部栏 -->
+            <header class="topbar">
+                <div class="topbar-left">
+                    <button class="menu-toggle" id="menuToggle">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    <h1 class="page-title" id="pageTitle">仪表盘</h1>
+                    <div id="inlineLoadingContainer"></div>
+                </div>
+                <div class="topbar-right">
+                    <button class="btn btn-sm btn-secondary" id="quickConnectBtn">
+                        <i class="fas fa-plug"></i>
+                        快速连接</button>
+                    <button class="btn btn-sm btn-secondary" id="themeToggle" aria-label="Toggle theme">
+                        <i class="fas fa-sun"></i>
+                        <i class="fas fa-moon" style="display: none;"></i>
+                    </button>
+                </div>
+            </header>
+
+            <!-- 页面内容容器 -->
+            <div class="page-container">
+                <!-- 仪表盘页面 -->
+                <div class="page active" id="page-dashboard">
+                    <div class="dashboard-grid">
+                        <!-- 统计卡片 -->
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fas fa-server"></i></div>
+                            <div class="stat-info">
+                                <div class="stat-value" id="totalChannels">0</div>
+                                <div class="stat-label">总渠道数</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fas fa-cube"></i></div>
+                            <div class="stat-info">
+                                <div class="stat-value" id="totalModels">0</div>
+                                <div class="stat-label">总模型数</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fas fa-check-circle"></i></div>
+                            <div class="stat-info">
+                                <div class="stat-value" id="activeChannels">0</div>
+                                <div class="stat-label">活跃渠道</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fas fa-exchange-alt"></i></div>
+                            <div class="stat-info">
+                                <div class="stat-value" id="uniqueModels">0</div>
+                                <div class="stat-label">映射规则</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 快速操作 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>快速操作</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="quick-actions">
+                                <button class="action-card" id="refreshChannelsBtn" data-action="refresh-channels">
+                                    <i class="fas fa-sync"></i>
+                                    <span>刷新渠道</span>
+                                </button>
+                                <button class="action-card" id="quickGlobalSearchBtn" data-action="global-search">
+                                    <i class="fas fa-search"></i>
+                                    <span>全局搜索</span>
+                                </button>
+                                <button class="action-card" id="quickOneClickUpdateBtn" data-action="one-click-update">
+                                    <i class="fas fa-magic"></i>
+                                    <span>一键更新</span>
+                                </button>
+                                <button class="action-card" id="quickStartSyncBtn" data-action="start-sync">
+                                    <i class="fas fa-play"></i>
+                                    <span>开始同步</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 最近活动 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>连接状态</h3>
+                        </div>
+                        <div class="card-body">
+                            <div id="connectionStatus" class="connection-info">
+                                <p class="text-muted">请先配置并连接到 NewAPI 服务器</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 渠道管理页面 -->
+                <div class="page" id="page-channels">
+                    <div class="page-header">
+                        <div class="page-actions">
+                            <input type="text" class="search-input" placeholder="搜索渠道..." id="channelSearch">
+                            <select class="form-select filter-select" id="channelTagFilter" title="按标签筛选">
+                                <option value="">全部标签</option>
+                            </select>
+                            <select class="form-select filter-select" id="channelSortBy" title="排序方式">
+                                <option value="id-asc">ID 升序</option>
+                                <option value="id-desc" selected>ID 降序</option>
+                                <option value="name-asc">名称 A-Z</option>
+                                <option value="name-desc">名称 Z-A</option>
+                                <option value="status">状态优先</option>
+                            </select>
+                            <button class="btn btn-secondary" id="reloadChannelsBtn">
+                                <i class="fas fa-sync-alt"></i> 刷新
+                            </button>
+                            <button class="btn btn-secondary" id="globalSearchBtn">
+                                <i class="fas fa-search"></i> 全局搜索
+                            </button>
+                            <button class="btn btn-secondary" id="oneClickUpdateBtn">
+                                <i class="fas fa-magic"></i> 一键更新</button>
+                            <button class="btn btn-secondary" id="clearSelectionsBtn">
+                                <i class="fas fa-times-circle"></i> 重置选择
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 已选模型展示区 -->
+                    <div class="selected-models-container" id="selectedModelsContainer" style="display: none;">
+                        <div class="selected-models-header">
+                            <h4 id="selectedModelsCountChannels">已选模型 (0)</h4>
+                            <button class="btn btn-sm btn-secondary" id="clearSelectedModelsBtnChannels">清空</button>
+                        </div>
+                        <div class="selected-models-list" id="selectedModelsList">
+                            <div class="empty-state">暂未选择模型</div>
+                        </div>
+                    </div>
+
+                    <div class="channels-count" id="channelsCount">共 0 个渠道</div>
+
+                    <!-- 渠道统计 -->
+                    <div class="channels-stats" id="channelsStats"></div>
+
+                    <div class="channels-grid" id="channelsGrid">
+                        <div class="empty-state">
+                            <i class="fas fa-server"></i>
+                            <p>暂无渠道数据</p>
+                            <small>请先连接到 NewAPI 服务器</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 模型映射页面 -->
+                <div class="page" id="page-mapping">
+                    <!-- 映射配置 -->
+                    <div class="mapping-panel mapping-panel-full">
+                        <div class="panel-header">
+                            <h3><i class="fas fa-exchange-alt"></i> 映射配置</h3>
+                            <div class="panel-actions">
+                                <button class="btn btn-sm btn-danger" id="deleteSelectedMappingsBtn" disabled>删除选中</button>
+                                <button class="btn btn-sm btn-secondary" id="resetPreviewBtn">恢复原始</button>
+                            </div>
+                        </div>
+                        <!-- 搜索过滤栏 -->
+                        <div class="mapping-filter-bar">
+                            <input type="text" class="search-input" id="mappingSearchInput" placeholder="搜索映射...">
+                            <div class="filter-group">
+                                <button class="filter-btn active" data-filter="all">全部</button>
+                                <button class="filter-btn" data-filter="changed">已修改</button>
+                                <button class="filter-btn" data-filter="unchanged">未修改</button>
+                            </div>
+                        </div>
+                        <div class="panel-body">
+                            <!-- 已选模型展示区 -->
+                            <div class="selected-models-section" id="selectedModelsSection" style="display:none;">
+                                <div class="selected-models-header">
+                                    <h4 id="selectedModelsCountMapping">已选模型 (0)</h4>
+                                    <button class="btn btn-sm btn-secondary" id="clearSelectedModelsBtnMapping">清空</button>
+                                </div>
+                                <div class="selected-models-list" id="originalModelsList">
+                                    <div class="empty-state">暂未选择模型</div>
+                                </div>
+                            </div>
+                            <div class="mapping-table-wrapper">
+                                <table class="mapping-table" id="mappingTable">
+                                    <thead>
+                                        <tr>
+                                            <th class="select-cell">
+                                                <input type="checkbox" id="mappingSelectAll" aria-label="选择全部">
+                                            </th>
+                                            <th>原始模型</th>
+                                            <th>→</th>
+                                            <th>映射后</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="mappingTableBody"></tbody>
+                                </table>
+                                <div class="empty-mapping-state" id="emptyMappingState">
+                                    <i class="fas fa-code-branch"></i>
+                                    <p>暂无映射配置</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="panel-footer">
+                            <span id="previewStats">共 0 个映射</span>
+                            <div class="panel-footer-actions">
+                                <button class="btn btn-primary" id="goToSyncBtn">
+                                    <i class="fas fa-arrow-right"></i> 准备完毕，去同步
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 映射选项 -->
+                    <div class="card mt-16">
+                        <div class="card-header">
+                            <h3><i class="fas fa-sliders-h"></i> 映射选项</h3>
+                            <span class="header-hint">控制模型名称的转换方式</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="options-list">
+                                <div class="option-item-enhanced option-item-inline">
+                                    <label class="option-toggle">
+                                        <input type="checkbox" id="smartNameMatching" checked>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                    <div class="option-content">
+                                        <span class="option-title">智能名称匹配</span>
+                                        <span class="option-desc">自动标准化模型名称，移除日期/版本/渠道标记并清理命名空间（如 deepseek-ai/xxx → xxx）</span>
+                                    </div>
+                                    <div class="option-inline-controls">
+                                        <label class="option-check">
+                                            <input type="checkbox" id="smartMatchKeepDate">
+                                            <span>保留日期后缀</span>
+                                        </label>
+                                        <label class="option-check">
+                                            <input type="checkbox" id="smartMatchKeepVersion">
+                                            <span>保留版本/状态后缀</span>
+                                        </label>
+                                        <label class="option-check">
+                                            <input type="checkbox" id="smartMatchKeepNamespace">
+                                            <span>保留命名空间</span>
+                                        </label>
+                                        <label class="option-check">
+                                            <input type="checkbox" id="smartMatchFormatName">
+                                            <span>统一命名格式</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="option-item-enhanced">
+                                    <label class="option-toggle">
+                                        <input type="checkbox" id="autoChannelSuffix">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                    <div class="option-content">
+                                        <span class="option-title">自动渠道后缀</span>
+                                        <span class="option-desc">在映射后的模型名末尾添加渠道名称标识（如 gpt-4 → gpt-4-渠道A）</span>
+                                    </div>
+                                </div>
+                                <div class="option-item-enhanced">
+                                    <label class="option-toggle">
+                                        <input type="checkbox" id="enableCustomRules">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                    <div class="option-content">
+                                        <span class="option-title">启用自定义规则</span>
+                                        <span class="option-desc">应用下方配置的自定义转换规则（正则替换、前缀后缀处理等）</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="options-actions">
+                                <button class="btn btn-sm btn-secondary" id="applyAllRulesBtn">
+                                    <i class="fas fa-play"></i> 应用规则并刷新</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 自定义规则管理 -->
+                    <div class="card mt-16">
+                        <div class="card-header">
+                            <h3><i class="fas fa-code"></i> 自定义规则</h3>
+                            <div class="panel-actions">
+                                <button class="btn btn-sm btn-secondary" id="openTemplatesBtn" title="从预设模板快速添加常用规则">
+                                    <i class="fas fa-layer-group"></i> 规则模板
+                                </button>
+                                <button class="btn btn-sm btn-primary" id="addCustomRuleBtn" title="创建新的自定义转换规则">
+                                    <i class="fas fa-plus"></i> 添加规则
+                                </button>
+                                <button class="btn btn-sm btn-secondary" id="saveCustomRulesBtn" title="保存当前自定义规则">
+                                    <i class="fas fa-save"></i> 保存规则
+                                </button>
+                                <button class="btn btn-sm btn-secondary" id="clearAllRulesBtn" title="清空所有自定义规则">
+                                    <i class="fas fa-trash"></i> 清空
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <!-- 规则说明面板 -->
+                            <div class="rules-help-panel">
+                                <div class="help-title"><i class="fas fa-info-circle"></i> 规则说明</div>
+                                <div class="help-content">
+                                    <div class="help-item">
+                                        <span class="help-label">正则替换</span>
+                                        <span class="help-text">使用正则表达式匹配并替换模型名（支持捕获组 $1, $2...）</span>
+                                    </div>
+                                    <div class="help-item">
+                                        <span class="help-label">字符串替换</span>
+                                        <span class="help-text">简单的文本查找替换，将所有匹配项替换为目标文本</span>
+                                    </div>
+                                    <div class="help-item">
+                                        <span class="help-label">前缀/后缀</span>
+                                        <span class="help-text">移除或替换模型名的开头/结尾部分</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="customRulesList" class="rules-list">
+                                <div class="empty-state">
+                                    <i class="fas fa-code"></i>
+                                    <p>暂无自定义规则</p>
+                                    <small>点击"添加规则"创建新规则，或从"规则模板"快速导入</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 同步操作页面 -->
+                <div class="page" id="page-sync">
+                    <div class="sync-controls card">
+                        <div class="card-header">
+                            <h3>同步控制</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="sync-options">
+                                <div class="option-group">
+                                    <label>更新模式</label>
+                                    <div class="radio-group">
+                                        <label><input type="radio" name="modelUpdateMode" value="append" checked> 追加模式</label>
+                                        <label><input type="radio" name="modelUpdateMode" value="replace"> 覆盖模式</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="sync-actions">
+                                <button class="btn btn-success btn-lg" id="startSyncBtn2">
+                                    <i class="fas fa-play"></i> 开始同步</button>
+                                <button class="btn btn-danger" id="rollbackSyncBtn" disabled>
+                                    <i class="fas fa-rotate-left"></i> 回退上次同步
+                                </button>
+                                <button class="btn btn-secondary" id="exportMappingBtn">
+                                    <i class="fas fa-download"></i> 导出配置
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card mt-16">
+                        <div class="card-header">
+                            <h3>同步进度</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="progress-container" id="progressContainer">
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                                </div>
+                                <div class="progress-text" id="progressText">等待同步...</div>
+                            </div>
+                            <div class="sync-logs" id="syncLogs"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 系统设置页面 -->
+                <div class="page" id="page-settings">
+                    <div class="settings-grid">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3><i class="fas fa-plug"></i> 连接配置</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-group">
+                                    <label>服务器地址</label>
+                                    <input type="url" class="form-input" id="baseUrl" placeholder="https://your-newapi.com">
+                                </div>
+                                <div class="form-group">
+                                    <label>访问令牌</label>
+                                    <input type="password" class="form-input" id="token" placeholder="输入访问令牌">
+                                </div>
+                                <div class="form-group">
+                                    <label>用户 ID</label>
+                                    <input type="number" class="form-input" id="userId" value="1">
+                                </div>
+                                <div class="form-actions">
+                                    <button class="btn btn-primary" id="saveConfigBtn">
+                                        <i class="fas fa-save"></i> 保存配置
+                                    </button>
+                                    <button class="btn btn-success" id="connectAndLoadBtn">
+                                        <i class="fas fa-plug"></i> 连接并加载</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <h3><i class="fas fa-database"></i> 缓存设置</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-group">
+                                    <label>模型缓存自动更新（分钟）</label>
+                                    <input type="number" class="form-input" id="modelCacheRefreshMinutes" min="1" step="1" value="5">
+                                    <span class="help-text">按该间隔后台刷新缓存，避免过期后逐个请求</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <h3><i class="fas fa-clock"></i> 定时监控</h3>
+                                <div class="header-actions">
+                                    <span id="monitorStatusBadge" class="badge badge-secondary">未启用</span>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-group">
+                                    <label class="toggle-label">
+                                        <input type="checkbox" id="monitorEnabled">
+                                        <span>启用定时监控</span>
+                                    </label>
+                                    <span class="help-text">自动检测失效的模型映射并发送告警</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>检测间隔（小时）</label>
+                                    <input type="number" class="form-input" id="monitorIntervalHours" min="1" max="168" value="6">
+                                </div>
+                                <div class="form-group">
+                                    <label class="toggle-label">
+                                        <input type="checkbox" id="monitorOnlyEnabled" checked>
+                                        <span>仅检测启用的渠道</span>
+                                    </label>
+                                </div>
+                                <hr style="margin: 16px 0; border-color: var(--border-color);">
+                                <h4 style="margin-bottom: 12px; font-size: 14px; color: var(--text-secondary);">Webhook 通知</h4>
+                                <div class="form-group">
+                                    <label class="toggle-label">
+                                        <input type="checkbox" id="webhookEnabled">
+                                        <span>启用 Webhook</span>
+                                    </label>
+                                </div>
+                                <div class="form-group">
+                                    <label>Webhook URL</label>
+                                    <input type="url" class="form-input" id="webhookUrl" placeholder="https://your-webhook.com/alert">
+                                </div>
+                                <div class="form-group">
+                                    <label>签名密钥（可选）</label>
+                                    <input type="password" class="form-input" id="webhookSecret" placeholder="用于 HMAC-SHA256 签名">
+                                </div>
+                                <hr style="margin: 16px 0; border-color: var(--border-color);">
+                                <h4 style="margin-bottom: 12px; font-size: 14px; color: var(--text-secondary);">Telegram 通知</h4>
+                                <div class="form-group">
+                                    <label class="toggle-label">
+                                        <input type="checkbox" id="telegramEnabled">
+                                        <span>启用 Telegram</span>
+                                    </label>
+                                </div>
+                                <div class="form-group">
+                                    <label>Bot Token</label>
+                                    <input type="password" class="form-input" id="telegramBotToken" placeholder="123456:ABC-DEF...">
+                                </div>
+                                <div class="form-group">
+                                    <label>Chat ID</label>
+                                    <input type="text" class="form-input" id="telegramChatId" placeholder="-1001234567890">
+                                </div>
+                                <div class="form-actions" style="flex-wrap: wrap; gap: 8px;">
+                                    <button class="btn btn-primary" id="saveMonitorSettingsBtn">
+                                        <i class="fas fa-save"></i> 保存设置
+                                    </button>
+                                    <button class="btn btn-info" id="manualCheckBtn">
+                                        <i class="fas fa-search"></i> 立即检测
+                                    </button>
+                                    <button class="btn btn-secondary" id="testWebhookBtn">
+                                        <i class="fas fa-bell"></i> 测试 Webhook
+                                    </button>
+                                    <button class="btn btn-secondary" id="testTelegramBtn">
+                                        <i class="fab fa-telegram"></i> 测试 Telegram
+                                    </button>
+                                </div>
+                                <div id="monitorLastCheck" class="help-text" style="margin-top: 12px;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 模态框 -->
+    <!-- 渠道模型模态框 -->
+    <div id="channelModelsModal" class="modal">
+        <div class="modal-container modal-large">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="channelModelsTitle">渠道模型</h3>
+                    <button class="modal-close" id="closeChannelModelsModalBtn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-section">
+                        <div class="section-header">
+                            <h4>已选择的模型 <span class="models-count" id="modalSelectedModelsCount">0 个</span></h4>
+                            <div class="section-actions">
+                                <button class="btn btn-sm btn-info" id="showNewAPIModelsBtn">原有模型</button>
+                                <button class="btn btn-sm btn-secondary" id="clearSelectedModelsBtnModal">清空</button>
+                                <button class="btn btn-sm btn-secondary" id="copySelectedModelsBtn">复制</button>
+                            </div>
+                        </div>
+                        <div id="modalSelectedModelsList" class="selected-models-list"></div>
+                    </div>
+
+                    <div class="modal-section">
+                        <div class="section-header">
+                            <h4>可用模型</h4>
+                            <div class="section-actions">
+                                <input type="text" class="search-input" id="modelsSearchInput" placeholder="搜索...">
+                                <span class="models-count" id="modelsCount">0 个</span>
+                                <button class="btn btn-sm btn-secondary" id="selectAllModelsBtn">全选</button>
+                            </div>
+                        </div>
+                        <div id="modelsList" class="models-list"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" id="refreshModelsBtn"><i class="fas fa-sync"></i> 刷新</button>
+                    <button class="btn btn-primary" id="addToMappingBtn"><i class="fas fa-plus"></i> 添加到映射</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 全局搜索模态框 -->
+    <div id="globalSearchModal" class="modal">
+        <div class="modal-container">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>全局模型搜索</h3>
+                    <button class="modal-close" id="closeGlobalSearchModalBtn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="search-box">
+                        <input type="text" class="search-input" id="globalSearchInput" placeholder="搜索模型...">
+                        <button class="btn btn-primary" id="performGlobalSearchBtn">搜索</button>
+                        <button class="btn btn-secondary" id="performDeepSearchBtn">深度搜索</button>
+                    </div>
+                    <div class="search-history-section">
+                        <div class="search-history-title">最近搜索</div>
+                        <div id="searchHistoryList" class="search-history"></div>
+                    </div>
+                    <div class="search-actions mt-16">
+                        <button class="btn btn-sm btn-secondary" id="selectAllGlobalResultsBtn">全选</button>
+                        <button class="btn btn-sm btn-secondary" id="deselectAllGlobalResultsBtn">取消全选</button>
+                        <button class="btn btn-sm btn-primary" id="applyGlobalSelectionBtn">应用选择</button>
+                    </div>
+                    <div id="globalSearchResults" class="model-categories"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 一键更新模态框 -->
+    <div id="oneClickUpdateModal" class="modal">
+        <div class="modal-container modal-large">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="oneClickUpdateModalTitle">一键更新模型</h3>
+                    <button class="modal-close" id="closeOneClickUpdateModalBtn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="info-banner">
+                        <i class="fas fa-info-circle"></i>
+                        <p>自动检测渠道商改名的模型并修复映射关系</p>
+                    </div>
+
+                    <div class="action-buttons mt-16">
+                        <button class="btn btn-info" id="previewOneClickUpdateBtn">
+                            <i class="fas fa-search"></i> 预览分析
+                        </button>
+                        <button class="btn btn-warning" id="executeOneClickUpdateBtn" disabled>
+                            <i class="fas fa-magic"></i> 执行更新
+                        </button>
+                        <button class="btn btn-danger" id="rollbackOneClickBtn" disabled>
+                            <i class="fas fa-rotate-left"></i> 回退上次更新
+                        </button>
+                        <button class="btn btn-secondary" id="cancelOneClickUpdateBtn" disabled>
+                            <i class="fas fa-stop"></i> 停止
+                        </button>
+                    </div>
+
+                    <div class="card mt-16">
+                        <div class="card-header">
+                            <h3>更新选项</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>并发</label>
+                                    <select class="form-select" id="oneClickConcurrency">
+                                        <option value="1">1</option>
+                                        <option value="2">2</option>
+                                        <option value="3">3</option>
+                                        <option value="4" selected>4</option>
+                                        <option value="5">5</option>
+                                        <option value="6">6</option>
+                                        <option value="8">8</option>
+                                        <option value="10">10</option>
+                                    </select>
+                                    <div class="option-row option-row-sub oneclick-update-mode">
+                                        <span class="option-title">更新模式</span>
+                                        <div class="radio-group">
+                                            <label><input type="radio" name="oneClickUpdateMode" value="replace" checked> 覆盖</label>
+                                            <label><input type="radio" name="oneClickUpdateMode" value="append"> 追加</label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>范围 / 日志</label>
+                                    <div class="options-grid">
+                                        <label class="option-item">
+                                            <input type="checkbox" id="oneClickOnlyEnabled" checked>
+                                            <span>仅启用渠道</span>
+                                        </label>
+                                        <label class="option-item">
+                                            <input type="checkbox" id="oneClickForceRefresh">
+                                            <span>强制刷新模型</span>
+                                        </label>
+                                        <label class="option-item">
+                                            <input type="checkbox" id="oneClickIncludeUpgrades">
+                                            <span title="如 gemini-2.5 -> gemini-3">检测版本升级</span>
+                                        </label>
+                                        <label class="option-item">
+                                            <input type="checkbox" id="oneClickVerboseLog">
+                                            <span>详细日志</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="oneClickUpdateProgress" class="progress-container mt-16" style="display:none;">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="oneClickUpdateProgressFill"></div>
+                        </div>
+                        <div class="progress-text" id="oneClickUpdateProgressText">分析中...</div>
+                    </div>
+
+                    <div id="oneClickUpdateResults" style="display:none;">
+                        <div class="stats-row mt-16">
+                            <span id="scannedChannelsCount" class="stat-badge">扫描: 0</span>
+                            <span id="fixableMappingsCount" class="stat-badge success">可修复: 0</span>
+                            <span id="selectedMappingsCount" class="stat-badge">已选: 0</span>
+                        </div>
+                        <div class="results-section mt-16">
+                            <div class="results-header">
+                                <h4>建议修复</h4>
+                                <div class="results-actions">
+                                    <button class="btn btn-sm btn-secondary" id="selectAllMappingsBtn">全选</button>
+                                    <button class="btn btn-sm btn-secondary" id="deselectAllMappingsBtn">取消全选</button>
+                                    <button class="btn btn-sm btn-secondary" id="selectHighConfidenceBtn">仅选高置信度</button>
+                                    <button class="btn btn-sm btn-primary" id="addSelectedMappingsBtn">添加到映射</button>
+                                </div>
+                            </div>
+                            <div id="newMappingsList" class="mappings-list"></div>
+                        </div>
+                    </div>
+
+                    <div id="oneClickUpdateLogs" class="sync-logs mt-16" style="display:none;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 原有模型模态框 -->
+    <div id="newAPIModelsModal" class="modal">
+        <div class="modal-container modal-large">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="newAPIModelsTitle">原有模型</h3>
+                    <button class="modal-close" id="closeNewAPIModelsModalBtn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="info-banner">
+                        <i class="fas fa-info-circle"></i>
+                        <p>显示该渠道配置中的原有模型（优先来自缓存）</p>
+                    </div>
+                    <div class="stats-row mt-16">
+                        <span id="newAPIModelsCount" class="stat-badge">共 0 个模型</span>
+                        <button class="btn btn-sm btn-secondary" id="selectAllNewAPIModelsBtn">全选</button>
+                    </div>
+                    <div id="newAPIModelsList" class="models-list mt-16"></div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" id="refreshNewAPIModelsBtn"><i class="fas fa-sync"></i> 刷新</button>
+                    <button class="btn btn-secondary" id="copyNewAPIModelsBtn"><i class="fas fa-copy"></i> 复制</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 自定义规则模态框 -->
+    <div id="customRuleModal" class="modal">
+        <div class="modal-container modal-large">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="customRuleModalTitle">自定义规则</h3>
+                    <button class="modal-close" id="closeCustomRuleModalBtn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>规则名称</label>
+                        <input type="text" class="form-input" id="customRuleName" placeholder="规则名称">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>规则类型</label>
+                            <select class="form-select" id="customRuleType">
+                                <option value="regex">正则替换</option>
+                                <option value="string">字符串替换</option>
+                                <option value="prefix">前缀处理</option>
+                                <option value="suffix">后缀处理</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>优先级</label>
+                            <input type="number" class="form-input" id="customRulePriority" value="100">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>匹配模式</label>
+                        <input type="text" class="form-input" id="customRulePattern" placeholder="匹配模式">
+                    </div>
+                    <div class="form-group">
+                        <label>替换值</label>
+                        <input type="text" class="form-input" id="customRuleReplacement" placeholder="替换文本">
+                    </div>
+                    <div class="form-group">
+                        <label>应用条件</label>
+                        <select class="form-select" id="customRuleCondition">
+                            <option value="all">所有模型</option>
+                            <option value="startswith">以指定文本开头</option>
+                            <option value="endswith">以指定文本结尾</option>
+                            <option value="contains">包含指定文本</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="conditionValueGroup" style="display:none;">
+                        <label>条件值</label>
+                        <input type="text" class="form-input" id="customRuleConditionValue">
+                    </div>
+                    <div class="form-group">
+                        <label>测试</label>
+                        <div class="test-row">
+                            <input type="text" class="form-input" id="customRuleTestInput" placeholder="输入测试文本">
+                            <button class="btn btn-primary" id="testCustomRuleBtn">测试</button>
+                        </div>
+                        <div id="customRuleTestResult" class="test-result" style="display:none;">
+                            <div><span>原始:</span> <span id="testOriginalName">-</span></div>
+                            <div><span>结果:</span> <span id="testResultName">-</span></div>
+                            <div><span>应用:</span> <span id="testApplied">-</span></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" id="cancelCustomRuleBtn">取消</button>
+                    <button class="btn btn-primary" id="saveCustomRuleBtn">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 规则模板模态框 -->
+    <div id="templateModal" class="modal">
+        <div class="modal-container">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3><i class="fas fa-layer-group"></i> 选择规则模板</h3>
+                    <button class="modal-close" id="closeTemplateModalBtn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="template-description">
+                        <p>选择预设的规则模板，快速应用常用规则集。</p>
+                    </div>
+                    <div id="templatesList" class="templates-list"></div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" id="closeTemplateBtn">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 通知容器 -->
+    <div id="notificationContainer"></div>
+
+    <!-- 模块化脚本 -->
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>

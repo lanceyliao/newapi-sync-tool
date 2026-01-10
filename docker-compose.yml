@@ -1,0 +1,12 @@
+services:
+  newapi-elegant:
+    build: .
+    ports:
+      - "8083:8083"
+    environment:
+      PORT: 8083
+      SECRET_KEY: change-me
+      CONFIG_DIR: /data
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
