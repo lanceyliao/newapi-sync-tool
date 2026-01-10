@@ -1,8 +1,8 @@
-# NewAPI Elegant
+# NewAPI SYNC TOOL
 
 [![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/G3451V)
 
-优雅的 NewAPI 同步工具（Node.js + Express）。
+NewAPI 同步工具（Node.js + Express）。
 
 ## 运行环境
 - Node.js 18+
