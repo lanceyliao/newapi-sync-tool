@@ -46,7 +46,7 @@ docker compose up -d
 4) Add a persistent volume and mount it to `/data`, then set `CONFIG_DIR=/data`.
 5) Create a Zeabur template and copy the deploy button code into this README.
 
-Button link format (replace with your template):
+Button link format :
 
 [![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/G3451V)
 
