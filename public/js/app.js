@@ -6,7 +6,7 @@
 
 // ============ 模块导入 ============
 import { state, saveState, loadState, modelCache } from './core/state.js';
-import { EVENTS, DEFAULT_CONFIG, STORAGE_KEYS, THEME } from './core/constants.js';
+import { EVENTS, DEFAULT_CONFIG, STORAGE_KEYS, THEME, VERSION, GITHUB_REPO } from './core/constants.js';
 import { eventBus } from './core/event.js';
 
 // UI 模块
@@ -58,6 +58,9 @@ class App {
 
       this.isInitialized = true;
       console.log('✅ NewAPI 同步工具已初始化');
+
+      // 检查更新
+      this.checkUpdate();
 
       // 自动连接或跳转到设置
       this.autoConnectOrRedirect();
@@ -1039,6 +1042,18 @@ class App {
           const stats = channelsModule.getChannelStats();
           this.updateStatsDisplay(stats);
 
+          // 迁移旧格式的映射数据（在渠道加载完成后调用）
+          import('./core/state.js').then(({ migrateMappingsAfterChannelsLoad }) => {
+            migrateMappingsAfterChannelsLoad();
+            // 重新渲染映射页面以显示迁移后的数据
+            if (window.mappingModule && typeof window.mappingModule.renderSelectedModels === 'function') {
+              window.mappingModule.renderSelectedModels();
+            }
+            if (window.mappingModule && typeof window.mappingModule.renderMappingTable === 'function') {
+              window.mappingModule.renderMappingTable();
+            }
+          });
+
           this.updateTopProgress(100);
           progress.complete('progressFill', 'progressText', '加载完成!');
 
@@ -1276,6 +1291,27 @@ class App {
   }
 
   // ============ 主题管理 ============
+
+  /**
+   * 检查更新
+   */
+  async checkUpdate() {
+    try {
+      const resp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const latest = data.tag_name?.replace(/^v/, '');
+      if (latest && latest !== VERSION) {
+        const badge = document.getElementById('updateBadge');
+        if (badge) {
+          badge.classList.remove('hidden');
+          badge.title = `新版本 v${latest} 可用，点击查看`;
+        }
+      }
+    } catch (e) {
+      console.warn('检查更新失败:', e);
+    }
+  }
 
   /**
    * 初始化主题

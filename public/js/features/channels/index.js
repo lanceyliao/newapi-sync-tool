@@ -327,7 +327,6 @@ const setChannelModelsCache = (channelId, data) => {
 const persistMappings = () => {
   try {
     localStorage.setItem(STORAGE_KEYS.MODEL_MAPPINGS, JSON.stringify(state.mappings));
-    localStorage.setItem('newapi-model-channel-map', JSON.stringify(state.modelChannelMap));
   } catch (error) {
     console.warn('保存映射缓存失败:', error);
   }
@@ -439,9 +438,8 @@ export const setSortBy = (sortBy) => {
 
 const getSelectedModelsForCurrentChannel = () => {
   if (!state.currentChannelId) return [];
-  return setOps.getModelsArray().filter(model => {
-    const channelInfo = state.modelChannelMap[model];
-    return channelInfo && String(channelInfo.id) === String(state.currentChannelId);
+  return setOps.getModelsArray().filter(item => {
+    return String(item.channelId) === String(state.currentChannelId);
   });
 };
 
@@ -924,13 +922,11 @@ export const renderModelsList = (filter = '', readonly = false) => {
     const storedCollapse = modelGroupCollapseState.get(group.key);
     const collapsed = expandAll ? false : (storedCollapse === undefined ? true : storedCollapse);
     const selectedCount = group.models.reduce((total, model) => {
-      const channelInfo = state.modelChannelMap[model];
-      const isSelectedForCurrentChannel = setOps.hasModel(model) && channelInfo && String(channelInfo.id) === String(currentChannelId);
+      const isSelectedForCurrentChannel = setOps.hasModel(model, currentChannelId);
       return total + (isSelectedForCurrentChannel ? 1 : 0);
     }, 0);
     const items = group.models.map(model => {
-      const channelInfo = state.modelChannelMap[model];
-      const isSelected = setOps.hasModel(model) && channelInfo && String(channelInfo.id) === String(currentChannelId);
+      const isSelected = setOps.hasModel(model, currentChannelId);
       return `
         <label class="model-item ${isSelected ? 'selected' : ''}">
           ${!readonly ? `<input type="checkbox" ${isSelected ? 'checked' : ''} data-model="${model}">` : ''}
@@ -982,7 +978,7 @@ export const renderModelsList = (filter = '', readonly = false) => {
         if (e.target.checked) {
           setOps.addModel(model, channelInfo);  // 传递渠道信息
         } else {
-          setOps.removeModel(model);
+          setOps.removeModel(model, state.currentChannelId);
         }
         updateModelItemSelection(cb, e.target.checked);
         updateSelectedDisplay();
@@ -1010,10 +1006,10 @@ export const renderModalSelectedModels = () => {
     return;
   }
 
-  list.innerHTML = selectedModels.map(model => `
+  list.innerHTML = selectedModels.map(item => `
     <div class="selected-model-item">
-      <span class="model-name" title="${model}">${model}</span>
-      <button class="btn-remove" data-model="${model}" title="移除">
+      <span class="model-name" title="${item.model} (${item.channelName})">${item.model}</span>
+      <button class="btn-remove" data-model="${item.model}" data-channel-id="${item.channelId}" title="移除">
         <i class="fas fa-times"></i>
       </button>
     </div>
@@ -1022,7 +1018,9 @@ export const renderModalSelectedModels = () => {
   list.querySelectorAll('.btn-remove').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      removeSelectedModel(btn.dataset.model);
+      const model = btn.dataset.model;
+      const channelId = btn.dataset.channelId;
+      removeSelectedModel(model, channelId);
     });
   });
 };
@@ -1052,14 +1050,9 @@ export const addSelectedModelsToMapping = (autoJump = true) => {
 
   checkboxes.forEach(cb => {
     const model = cb.dataset.model;
-    const exists = setOps.hasModel(model);
+    // 检查当前渠道是否已有该模型
+    const exists = setOps.hasModel(model, state.currentChannelId);
     setOps.addModel(model, channelInfo);
-    if (!state.mappings.hasOwnProperty(model)) {
-      state.mappings[model] = model;
-    }
-    if (!state.modelChannelMap[model] && channelInfo) {
-      state.modelChannelMap[model] = channelInfo;
-    }
     if (!exists) {
       count++;
       console.log(`✅ 添加模型: ${model}`, { 渠道: channelInfo });
@@ -1127,14 +1120,9 @@ export const selectAllVisibleModels = () => {
 
   checkboxes.forEach(cb => {
     const model = cb.dataset.model;
-    const exists = setOps.hasModel(model);
+    // 检查当前渠道是否已有该模型
+    const exists = setOps.hasModel(model, state.currentChannelId);
     setOps.addModel(model, channelInfo);
-    if (!state.mappings.hasOwnProperty(model)) {
-      state.mappings[model] = model;
-    }
-    if (!state.modelChannelMap[model] && channelInfo) {
-      state.modelChannelMap[model] = channelInfo;
-    }
     updateModelItemSelection(cb, true);
     if (!exists) addedCount++;
   });
@@ -1171,7 +1159,7 @@ export const deselectAllVisibleModels = () => {
   checkboxes.forEach(cb => {
     if (!cb.checked) return;
     const model = cb.dataset.model;
-    setOps.removeModel(model);
+    setOps.removeModel(model, state.currentChannelId);
     updateModelItemSelection(cb, false);
     removedCount++;
   });
@@ -1203,7 +1191,7 @@ export const clearSelectedModelsForCurrentChannel = () => {
     return;
   }
 
-  selectedModels.forEach(model => setOps.removeModel(model));
+  selectedModels.forEach(item => setOps.removeModel(item.model, item.channelId));
   updateSelectedDisplay();
   renderModalSelectedModels();
   renderModelsList('', false);
@@ -1223,7 +1211,7 @@ export const copySelectedModelsForCurrentChannel = async () => {
   }
 
   try {
-    await copyToClipboard(selectedModels.join('\n'));
+    await copyToClipboard(selectedModels.map(m => m.model).join('\n'));
     notifications.success(`已复制 ${selectedModels.length} 个模型`);
   } catch (error) {
     notifications.warning('复制失败，请重试');
@@ -1623,10 +1611,8 @@ export const selectAllModelsFromChannel = async (channelId) => {
   // 全选所有模型
   let count = 0;
   models.forEach(model => {
-    if (!setOps.hasModel(model)) {
+    if (!setOps.hasModel(model, channelId)) {
       setOps.addModel(model, channelInfo);
-      state.mappings[model] = model;
-      state.modelChannelMap[model] = channelInfo;
       count++;
     }
   });
@@ -1659,10 +1645,8 @@ export const selectAllNewAPIModels = () => {
     const resolvedTarget = findAvailableModelName(targetCandidate, availableModels);
     if (!resolvedTarget) return;
 
-    if (!setOps.hasModel(resolvedTarget)) {
+    if (!setOps.hasModel(resolvedTarget, state.currentChannelId)) {
       setOps.addModel(resolvedTarget, channelInfo);
-      state.mappings[resolvedTarget] = resolvedTarget;
-      state.modelChannelMap[resolvedTarget] = channelInfo;
       count++;
     }
   });
@@ -1762,14 +1746,18 @@ export const updateSelectedDisplay = () => {
 
   container.style.display = '';
   if (list) {
-    list.innerHTML = models.map(model => {
-      const channelInfo = state.modelChannelMap[model];
-      const channelName = (channelInfo && channelInfo.name) || '未知渠道';
+    list.innerHTML = models.map(item => {
+      // 兼容两种数据格式：对象 {id, channelId, channelName, model} 或字符串
+      const isObject = typeof item === 'object' && item !== null;
+      const modelName = isObject ? item.model : item;
+      const channelName = isObject 
+        ? (item.channelName || '未知渠道')
+        : ((state.modelChannelMap[item] && state.modelChannelMap[item].name) || '未知渠道');
       return `
         <div class="selected-model-item">
-          <span class="model-name" title="${model}">${model}</span>
+          <span class="model-name" title="${modelName}">${modelName}</span>
           <span class="model-channel">${channelName}</span>
-          <button class="btn-remove" data-model="${model}" title="移除">
+          <button class="btn-remove" data-model="${modelName}" title="移除">
             <i class="fas fa-times"></i>
           </button>
         </div>

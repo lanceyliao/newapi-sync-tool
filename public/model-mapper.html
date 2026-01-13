@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模型映射管理 - NewAPI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .mapping-row:hover { background-color: #f9fafb; }
+        .mapping-row.checked { background-color: #eff6ff; }
+        .drag-handle { cursor: grab; }
+        .drag-handle:active { cursor: grabbing; }
+        .drag-over { border: 2px dashed #3b82f6; background-color: #eff6ff; }
+        .fade-in { animation: fadeIn 0.2s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+        .slide-in { animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div id="app" class="container mx-auto px-4 py-8 max-w-6xl">
+        <!-- 头部工具栏 -->
+        <div class="bg-white rounded-lg shadow-sm p-4 mb-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-4">
+                    <h1 class="text-xl font-semibold text-gray-800">模型映射管理</h1>
+                    <select id="channelSelect" class="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">选择渠道...</option>
+                    </select>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="saveBtn" class="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+                        保存
+                    </button>
+                    <button id="resetBtn" class="px-4 py-1.5 border border-gray-300 rounded hover:bg-gray-50 transition text-sm">
+                        重置
+                    </button>
+                    <div class="h-6 w-px bg-gray-300 mx-2"></div>
+                    <button id="importBtn" class="px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50 transition text-sm">
+                        导入
+                    </button>
+                    <button id="exportBtn" class="px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50 transition text-sm">
+                        导出
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 状态提示区 -->
+        <div id="statusBar" class="hidden mb-4 px-4 py-3 rounded-lg text-sm fade-in"></div>
+
+        <!-- 主内容区 -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <!-- 左侧: 映射管理 -->
+            <div class="lg:col-span-2 space-y-4">
+                <!-- 工具栏 -->
+                <div class="bg-white rounded-lg shadow-sm p-4">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="selectAll" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                                <span class="text-sm text-gray-700">全选</span>
+                            </label>
+                            <button id="inverseBtn" class="text-sm text-gray-600 hover:text-blue-600 transition">反选</button>
+                            <button id="deleteSelectedBtn" class="text-sm text-red-600 hover:text-red-700 transition disabled:opacity-50" disabled>
+                                删除选中
+                            </button>
+                        </div>
+                        <button id="addMappingBtn" class="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 transition text-sm font-medium">
+                            + 添加映射
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 映射表格 -->
+                <div class="bg-white rounded-lg shadow-sm overflow-hidden">
+                    <table class="w-full">
+                        <thead class="bg-gray-100 border-b border-gray-200">
+                            <tr>
+                                <th class="w-10 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"></th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-5/12">源模型</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/12"></th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-5/12">目标模型</th>
+                                <th class="w-20 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="mappingTableBody" class="divide-y divide-gray-200">
+                            <!-- 映射行将在这里动态生成 -->
+                        </tbody>
+                    </table>
+                    <div id="emptyState" class="hidden px-4 py-12 text-center">
+                        <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        <h3 class="mt-2 text-sm font-medium text-gray-900">暂无映射</h3>
+                        <p class="mt-1 text-sm text-gray-500">点击"添加映射"开始创建</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧: 规则面板 -->
+            <div class="space-y-4">
+                <!-- 智能规则 -->
+                <div class="bg-white rounded-lg shadow-sm p-4">
+                    <h2 class="text-sm font-semibold text-gray-800 mb-3">智能规则</h2>
+                    <div class="space-y-3">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="prefixCleanup" checked class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                            <span class="text-sm text-gray-700">清理前缀 [xxx] 【xxx】 (xxx) &lt;xxx&gt;</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="suffixCleanup" checked class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                            <span class="text-sm text-gray-700">清理后缀 日期/版本/渠道标识</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="wildcardMode" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                            <span class="text-sm text-gray-700">通配符模式 Pro/* *DeepSeek* *</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="chainMapping" checked class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                            <span class="text-sm text-gray-700">链式映射 A → B → C</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 自定义规则 -->
+                <div class="bg-white rounded-lg shadow-sm p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h2 class="text-sm font-semibold text-gray-800">自定义规则</h2>
+                        <button id="addRuleBtn" class="text-sm text-blue-600 hover:text-blue-700 transition">+ 添加</button>
+                    </div>
+                    <div id="customRulesList" class="space-y-2 max-h-48 overflow-y-auto">
+                        <!-- 自定义规则将在这里动态生成 -->
+                    </div>
+                </div>
+
+                <!-- 预览区 -->
+                <div class="bg-white rounded-lg shadow-sm p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h2 class="text-sm font-semibold text-gray-800">预览差异</h2>
+                        <span id="previewCount" class="text-xs text-gray-500">0 处变更</span>
+                    </div>
+                    <div id="previewArea" class="max-h-48 overflow-y-auto text-sm bg-gray-50 rounded p-3 font-mono text-xs">
+                        暂无预览
+                    </div>
+                    <button id="previewBtn" class="mt-3 w-full px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50 transition text-sm">
+                        预览变更
+                    </button>
+                </div>
+
+                <!-- 一键应用 -->
+                <div class="bg-white rounded-lg shadow-sm p-4">
+                    <h2 class="text-sm font-semibold text-gray-800 mb-3">一键应用</h2>
+                    <div class="space-y-2">
+                        <button id="checkpointBtn" class="w-full px-3 py-2 border border-gray-300 rounded hover:bg-gray-50 transition text-sm" disabled>
+                            📦 创建检查点
+                        </button>
+                        <button id="syncBtn" class="w-full px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                            🚀 同步到渠道
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加/编辑规则弹窗 -->
+    <div id="ruleModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 fade-in">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h3 id="ruleModalTitle" class="text-lg font-semibold text-gray-800">添加自定义规则</h3>
+            </div>
+            <div class="px-6 py-4 space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">规则类型</label>
+                    <select id="ruleType" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="string">精确匹配</option>
+                        <option value="prefix">前缀匹配</option>
+                        <option value="suffix">后缀匹配</option>
+                        <option value="regex">正则表达式</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">匹配模式</label>
+                    <input type="text" id="rulePattern" placeholder="例如: gpt-4" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">目标模型</label>
+                    <input type="text" id="ruleTarget" placeholder="例如: gpt-4-turbo" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 flex justify-end gap-2">
+                <button id="cancelRuleBtn" class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 transition text-sm">
+                    取消
+                </button>
+                <button id="saveRuleBtn" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm">
+                    保存
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导入弹窗 -->
+    <div id="importModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 fade-in">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-semibold text-gray-800">导入映射配置</h3>
+            </div>
+            <div class="px-6 py-4">
+                <textarea id="importText" rows="8" placeholder="粘贴 JSON 配置..." class="w-full border border-gray-300 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 flex justify-end gap-2">
+                <button id="cancelImportBtn" class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 transition text-sm">
+                    取消
+                </button>
+                <button id="confirmImportBtn" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm">
+                    导入
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript -->
+    <script>
+    // ==================== 数据模型 ====================
+    const StoreKey = 'newapi-model-mappings';
+
+    const defaultState = {
+        mappings: [],
+        rules: {
+            prefixCleanup: true,
+            suffixCleanup: true,
+            wildcardMode: false,
+            chainMapping: true
+        },
+        customRules: []
+    };
+
+    let state = loadState();
+
+    // ==================== 本地存储 ====================
+    function loadState() {
+        try {
+            const saved = localStorage.getItem(StoreKey);
+            return saved ? JSON.parse(saved) : JSON.parse(JSON.stringify(defaultState));
+        } catch (e) {
+            console.error('加载状态失败:', e);
+            return JSON.parse(JSON.stringify(defaultState));
+        }
+    }
+
+    function saveState() {
+        try {
+            localStorage.setItem(StoreKey, JSON.stringify(state));
+            showStatus('已保存', 'success');
+        } catch (e) {
+            console.error('保存状态失败:', e);
+            showStatus('保存失败', 'error');
+        }
+    }
+
+    function resetState() {
+        state = JSON.parse(JSON.stringify(defaultState));
+        saveState();
+        renderAll();
+        showStatus('已重置为默认值', 'info');
+    }
+
+    // ==================== 状态提示 ====================
+    function showStatus(message, type = 'info') {
+        const bar = document.getElementById('statusBar');
+        const colors = {
+            success: 'bg-green-50 text-green-700 border border-green-200',
+            error: 'bg-red-50 text-red-700 border border-red-200',
+            warning: 'bg-yellow-50 text-yellow-700 border border-yellow-200',
+            info: 'bg-blue-50 text-blue-700 border border-blue-200'
+        };
+        bar.className = `mb-4 px-4 py-3 rounded-lg text-sm fade-in ${colors[type] || colors.info}`;
+        bar.textContent = message;
+        bar.classList.remove('hidden');
+
+        if (type !== 'error') {
+            setTimeout(() => bar.classList.add('hidden'), 3000);
+        }
+    }
+
+    // ==================== 渲染函数 ====================
+    function renderAll() {
+        renderMappings();
+        renderCustomRules();
+        updatePreview();
+        updateButtons();
+    }
+
+    function renderMappings() {
+        const tbody = document.getElementById('mappingTableBody');
+        const emptyState = document.getElementById('emptyState');
+
+        if (state.mappings.length === 0) {
+            tbody.innerHTML = '';
+            emptyState.classList.remove('hidden');
+            return;
+        }
+
+        emptyState.classList.add('hidden');
+        tbody.innerHTML = state.mappings.map((m, i) => `
+            <tr class="mapping-row fade-in ${m.checked ? 'checked' : ''}" data-index="${i}">
+                <td class="px-4 py-3">
+                    <input type="checkbox" class="mapping-check w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" ${m.checked ? 'checked' : ''}>
+                </td>
+                <td class="px-4 py-3">
+                    <input type="text" value="${escapeHtml(m.source)}" class="source-input w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="源模型">
+                </td>
+                <td class="px-4 py-3 text-center text-gray-400">→</td>
+                <td class="px-4 py-3">
+                    <input type="text" value="${escapeHtml(m.target)}" class="target-input w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="目标模型">
+                </td>
+                <td class="px-4 py-3">
+                    <button class="delete-btn text-red-600 hover:text-red-700 transition" title="删除">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                        </svg>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+
+        // 绑定事件
+        tbody.querySelectorAll('.mapping-row').forEach(row => {
+            const index = parseInt(row.dataset.index);
+            const checkbox = row.querySelector('.mapping-check');
+            const sourceInput = row.querySelector('.source-input');
+            const targetInput = row.querySelector('.target-input');
+            const deleteBtn = row.querySelector('.delete-btn');
+
+            checkbox?.addEventListener('change', () => {
+                state.mappings[index].checked = checkbox.checked;
+                row.classList.toggle('checked', checkbox.checked);
+                updateButtons();
+            });
+
+            sourceInput?.addEventListener('input', () => {
+                state.mappings[index].source = sourceInput.value;
+                updatePreview();
+            });
+
+            targetInput?.addEventListener('input', () => {
+                state.mappings[index].target = targetInput.value;
+                updatePreview();
+            });
+
+            deleteBtn?.addEventListener('click', () => {
+                state.mappings.splice(index, 1);
+                renderMappings();
+                updatePreview();
+                updateButtons();
+            });
+        });
+    }
+
+    function renderCustomRules() {
+        const container = document.getElementById('customRulesList');
+        if (state.customRules.length === 0) {
+            container.innerHTML = '<p class="text-sm text-gray-400 text-center py-4">暂无自定义规则</p>';
+            return;
+        }
+
+        container.innerHTML = state.customRules.map((r, i) => `
+            <div class="flex items-center justify-between p-2 bg-gray-50 rounded text-sm slide-in">
+                <div class="flex items-center gap-2 overflow-hidden">
+                    <span class="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-mono">${r.type}</span>
+                    <span class="text-gray-600 truncate" title="${escapeHtml(r.pattern)}">${escapeHtml(r.pattern)}</span>
+                    <span class="text-gray-400">→</span>
+                    <span class="text-gray-800 font-medium truncate" title="${escapeHtml(r.target)}">${escapeHtml(r.target)}</span>
+                </div>
+                <button class="delete-rule-btn text-red-600 hover:text-red-700 transition" data-index="${i}">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+        `).join('');
+
+        container.querySelectorAll('.delete-rule-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const index = parseInt(btn.dataset.index);
+                state.customRules.splice(index, 1);
+                renderCustomRules();
+                updatePreview();
+            });
+        });
+    }
+
+    function updatePreview() {
+        const previewArea = document.getElementById('previewArea');
+        const previewCount = document.getElementById('previewCount');
+        const changes = generatePreview();
+
+        if (changes.length === 0) {
+            previewArea.innerHTML = '<span class="text-gray-400">暂无预览</span>';
+            previewCount.textContent = '0 处变更';
+            return;
+        }
+
+        previewArea.innerHTML = changes.map(c => `
+            <div class="py-1 border-b border-gray-200 last:border-0">
+                <span class="text-red-600">${escapeHtml(c.source)}</span>
+                <span class="text-gray-400 mx-1">→</span>
+                <span class="text-green-600">${escapeHtml(c.target)}</span>
+            </div>
+        `).join('');
+
+        previewCount.textContent = `${changes.length} 处变更`;
+    }
+
+    function updateButtons() {
+        const checkedCount = state.mappings.filter(m => m.checked).length;
+        document.getElementById('deleteSelectedBtn').disabled = checkedCount === 0;
+        document.getElementById('syncBtn').disabled = state.mappings.length === 0;
+        document.getElementById('checkpointBtn').disabled = state.mappings.length === 0;
+    }
+
+    // ==================== 规则引擎 ====================
+    function generatePreview() {
+        const mappings = [];
+        const processed = new Set();
+
+        // 链式映射
+        const getFinalTarget = (source) => {
+            if (!state.rules.chainMapping) return source;
+            const direct = state.mappings.find(m => m.source === source);
+            if (!direct) return source;
+            if (direct.target === source) return source;
+            return getFinalTarget(direct.target);
+        };
+
+        // 自定义规则
+        const applyCustomRules = (model) => {
+            for (const rule of state.customRules) {
+                if (!rule.enabled && rule.enabled !== undefined) continue;
+                let match = false;
+                switch (rule.type) {
+                    case 'string': match = model === rule.pattern; break;
+                    case 'prefix': match = model.startsWith(rule.pattern); break;
+                    case 'suffix': match = model.endsWith(rule.pattern); break;
+                    case 'regex': try { match = new RegExp(rule.pattern).test(model); } catch (e) {} break;
+                }
+                if (match) return rule.target;
+            }
+            return model;
+        };
+
+        // 前后缀清理
+        const cleanup = (model) => {
+            let result = model;
+            if (state.rules.prefixCleanup) {
+                result = result.replace(/^[\[\]【】\(\)<>][^\[\]【】\(\)<>]*[\]【】\(\)<>]\s*/g, '');
+                result = result.replace(/^[^\[\]【】\(\)<>]*[\]【】\(\)<>]\s*/g, '');
+            }
+            if (state.rules.suffixCleanup) {
+                result = result.replace(/\s*[\[\]【】\(\)<>][^\[\]【】\(\)<>]*[\]【】\(\)<>]$/g, '');
+                result = result.replace(/\s*[_\-–—][vV]?\d+(\.\d+)*(\s*[-–—]\S+)?$/g, '');
+                result = result.replace(/\s*\([^)]*\)$/g, '');
+            }
+            return result.trim();
+        };
+
+        // 通配符匹配
+        const wildcardMatch = (source, target) => {
+            if (!state.rules.wildcardMode) return source === target;
+            const pattern = target.replace(/\*/g, '.*');
+            try {
+                const regex = new RegExp(`^${pattern}$`, 'i');
+                return regex.test(source);
+            } catch (e) {
+                return source === target;
+            }
+        };
+
+        // 生成预览
+        for (const m of state.mappings) {
+            if (!m.source || processed.has(m.source)) continue;
+
+            let source = m.source;
+            let target = m.target;
+
+            // 应用清理
+            if (state.rules.prefixCleanup || state.rules.suffixCleanup) {
+                source = cleanup(source);
+            }
+
+            // 应用自定义规则
+            target = applyCustomRules(target);
+
+            // 处理数组映射
+            if (Array.isArray(target)) {
+                target = target[0];
+            }
+
+            // 链式映射
+            if (state.rules.chainMapping) {
+                target = getFinalTarget(target);
+            }
+
+            if (source !== target) {
+                mappings.push({ source: m.source, target: target });
+            }
+
+            processed.add(m.source);
+        }
+
+        return mappings;
+    }
+
+    // ==================== API 调用 ====================
+    const API_BASE = '/api';
+
+    async function fetchChannels() {
+        try {
+            const res = await fetch(`${API_BASE}/channels`);
+            if (!res.ok) throw new Error('获取渠道列表失败');
+            return await res.json();
+        } catch (e) {
+            console.error('API 错误:', e);
+            showStatus('获取渠道列表失败: ' + e.message, 'error');
+            return [];
+        }
+    }
+
+    async function fetchChannelDetail(id) {
+        try {
+            const res = await fetch(`${API_BASE}/channel-detail`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id })
+            });
+            if (!res.ok) throw new Error('获取渠道详情失败');
+            return await res.json();
+        } catch (e) {
+            console.error('API 错误:', e);
+            showStatus('获取渠道详情失败: ' + e.message, 'error');
+            return null;
+        }
+    }
+
+    async function syncModels(channelId, mappings) {
+        try {
+            const res = await fetch(`${API_BASE}/sync-models`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: channelId, model_mapping: mappings })
+            });
+            if (!res.ok) throw new Error('同步失败');
+            return await res.json();
+        } catch (e) {
+            console.error('API 错误:', e);
+            showStatus('同步失败: ' + e.message, 'error');
+            return null;
+        }
+    }
+
+    async function createCheckpoint(channelId, name) {
+        try {
+            const res = await fetch(`${API_BASE}/checkpoint/create`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ channelId, name: name || `备份 ${new Date().toLocaleString()}` })
+            });
+            if (!res.ok) throw new Error('创建检查点失败');
+            return await res.json();
+        } catch (e) {
+            console.error('API 错误:', e);
+            showStatus('创建检查点失败: ' + e.message, 'error');
+            return null;
+        }
+    }
+
+    // ==================== 事件绑定 ====================
+    function bindEvents() {
+        // 保存
+        document.getElementById('saveBtn')?.addEventListener('click', () => {
+            saveState();
+        });
+
+        // 重置
+        document.getElementById('resetBtn')?.addEventListener('click', () => {
+            if (confirm('确定要重置所有设置吗？')) {
+                resetState();
+            }
+        });
+
+        // 全选
+        document.getElementById('selectAll')?.addEventListener('change', (e) => {
+            state.mappings.forEach(m => m.checked = e.target.checked);
+            renderMappings();
+            updateButtons();
+        });
+
+        // 反选
+        document.getElementById('inverseBtn')?.addEventListener('click', () => {
+            state.mappings.forEach(m => m.checked = !m.checked);
+            renderMappings();
+            updateButtons();
+        });
+
+        // 删除选中
+        document.getElementById('deleteSelectedBtn')?.addEventListener('click', () => {
+            const checked = state.mappings.filter(m => m.checked);
+            if (checked.length === 0) return;
+            if (confirm(`确定删除选中的 ${checked.length} 条映射吗？`)) {
+                state.mappings = state.mappings.filter(m => !m.checked);
+                renderMappings();
+                updatePreview();
+                updateButtons();
+            }
+        });
+
+        // 添加映射
+        document.getElementById('addMappingBtn')?.addEventListener('click', () => {
+            state.mappings.unshift({ source: '', target: '', checked: false });
+            renderMappings();
+            updatePreview();
+            updateButtons();
+        });
+
+        // 规则开关
+        ['prefixCleanup', 'suffixCleanup', 'wildcardMode', 'chainMapping'].forEach(id => {
+            document.getElementById(id)?.addEventListener('change', (e) => {
+                state.rules[id] = e.target.checked;
+                updatePreview();
+            });
+        });
+
+        // 添加规则
+        document.getElementById('addRuleBtn')?.addEventListener('click', () => {
+            document.getElementById('ruleModal').classList.remove('hidden');
+            document.getElementById('rulePattern').value = '';
+            document.getElementById('ruleTarget').value = '';
+        });
+
+        // 预览
+        document.getElementById('previewBtn')?.addEventListener('click', () => {
+            updatePreview();
+            showStatus(`预览完成，共 ${generatePreview().length} 处变更`, 'success');
+        });
+
+        // 导入
+        document.getElementById('importBtn')?.addEventListener('click', () => {
+            document.getElementById('importModal').classList.remove('hidden');
+            document.getElementById('importText').value = '';
+        });
+
+        // 导出
+        document.getElementById('exportBtn')?.addEventListener('click', () => {
+            const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `model-mappings-${new Date().toISOString().slice(0, 10)}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showStatus('已导出配置', 'success');
+        });
+
+        // 规则弹窗
+        document.getElementById('cancelRuleBtn')?.addEventListener('click', () => {
+            document.getElementById('ruleModal').classList.add('hidden');
+        });
+
+        document.getElementById('saveRuleBtn')?.addEventListener('click', () => {
+            const type = document.getElementById('ruleType').value;
+            const pattern = document.getElementById('rulePattern').value.trim();
+            const target = document.getElementById('ruleTarget').value.trim();
+
+            if (!pattern || !target) {
+                showStatus('请填写规则内容', 'warning');
+                return;
+            }
+
+            state.customRules.push({ type, pattern, target });
+            renderCustomRules();
+            updatePreview();
+            document.getElementById('ruleModal').classList.add('hidden');
+            showStatus('规则已添加', 'success');
+        });
+
+        // 导入弹窗
+        document.getElementById('cancelImportBtn')?.addEventListener('click', () => {
+            document.getElementById('importModal').classList.add('hidden');
+        });
+
+        document.getElementById('confirmImportBtn')?.addEventListener('click', () => {
+            try {
+                const imported = JSON.parse(document.getElementById('importText').value);
+                if (imported.mappings) state.mappings = imported.mappings;
+                if (imported.rules) state.rules = imported.rules;
+                if (imported.customRules) state.customRules = imported.customRules;
+                renderAll();
+                document.getElementById('importModal').classList.add('hidden');
+                showStatus(`已导入 ${imported.mappings?.length || 0} 条映射`, 'success');
+            } catch (e) {
+                showStatus('JSON 格式错误', 'error');
+            }
+        });
+
+        // 同步
+        document.getElementById('syncBtn')?.addEventListener('click', async () => {
+            const channelId = document.getElementById('channelSelect').value;
+            if (!channelId) {
+                showStatus('请选择渠道', 'warning');
+                return;
+            }
+
+            const mappings = {};
+            state.mappings.forEach(m => {
+                if (m.source && m.target) mappings[m.source] = m.target;
+            });
+
+            showStatus('同步中...', 'info');
+            const result = await syncModels(channelId, mappings);
+            if (result) {
+                showStatus('同步成功', 'success');
+            }
+        });
+
+        // 检查点
+        document.getElementById('checkpointBtn')?.addEventListener('click', async () => {
+            const channelId = document.getElementById('channelSelect').value;
+            if (!channelId) {
+                showStatus('请选择渠道', 'warning');
+                return;
+            }
+
+            const name = prompt('检查点名称:', `备份 ${new Date().toLocaleString()}`);
+            if (!name) return;
+
+            const result = await createCheckpoint(channelId, name);
+            if (result) {
+                showStatus('检查点已创建', 'success');
+            }
+        });
+
+        // 渠道选择
+        document.getElementById('channelSelect')?.addEventListener('change', async (e) => {
+            const channelId = e.target.value;
+            if (!channelId) return;
+
+            showStatus('加载渠道数据...', 'info');
+            const detail = await fetchChannelDetail(channelId);
+            if (detail && detail.model_mapping) {
+                try {
+                    const mappings = typeof detail.model_mapping === 'string'
+                        ? JSON.parse(detail.model_mapping)
+                        : detail.model_mapping;
+
+                    state.mappings = Object.entries(mappings).map(([source, target]) => ({
+                        source,
+                        target: Array.isArray(target) ? target[0] : target,
+                        checked: false
+                    }));
+                    renderMappings();
+                    updatePreview();
+                    showStatus(`已加载 ${state.mappings.length} 条映射`, 'success');
+                } catch (e) {
+                    showStatus('解析映射数据失败', 'error');
+                }
+            } else {
+                showStatus('该渠道无映射数据', 'info');
+            }
+        });
+    }
+
+    // ==================== 工具函数 ====================
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // ==================== 初始化 ====================
+    async function init() {
+        renderAll();
+        bindEvents();
+
+        // 加载渠道列表
+        const channels = await fetchChannels();
+        const select = document.getElementById('channelSelect');
+        if (channels.length > 0) {
+            select.innerHTML = '<option value="">选择渠道...</option>' +
+                channels.map(c => `<option value="${c.id}">${c.name || c.id}</option>`).join('');
+        }
+
+        showStatus('页面已加载', 'success');
+    }
+
+    // 页面加载完成后初始化
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+    </script>
+</body>
+</html>

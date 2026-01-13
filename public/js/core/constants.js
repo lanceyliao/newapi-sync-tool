@@ -2,6 +2,10 @@
  * 常量定义
  */
 
+// 版本信息
+export const VERSION = '4.0';
+export const GITHUB_REPO = 'ZiChuanShanFeng/newapi-sync-tool';
+
 // 默认配置
 export const DEFAULT_CONFIG = {
   baseUrl: '',
@@ -71,6 +75,8 @@ export const EVENTS = {
 };
 
 export default {
+  VERSION,
+  GITHUB_REPO,
   DEFAULT_CONFIG,
   CACHE_CONFIG,
   SEARCH_CONFIG,

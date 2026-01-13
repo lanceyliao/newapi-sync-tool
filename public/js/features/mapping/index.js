@@ -60,8 +60,9 @@ const getMappingStatsFromState = () => {
   syncSelectedMappingSources();
   let changedCount = 0;
 
-  for (const source of models) {
-    const target = state.mappings[source] || source;
+  for (const item of models) {
+    const source = item.model;
+    const target = state.mappings[item.id]?.targetModel || source;
     if (source !== target) {
       changedCount++;
     }
@@ -647,19 +648,18 @@ export const renderMappingTable = () => {
     console.log('✅ 隐藏空状态');
   }
 
-  tbody.innerHTML = models.map(source => {
-    const target = state.mappings[source] || source;
-    const channelInfo = state.modelChannelMap[source];
-    const channelLabel = channelInfo && channelInfo.name
-      ? channelInfo.name
-      : (channelInfo && channelInfo.id ? `渠道 ${channelInfo.id}` : '未知渠道');
+  tbody.innerHTML = models.map(item => {
+    const source = item.model;
+    const compositeKey = item.id;
+    const target = state.mappings[compositeKey]?.targetModel || source;
+    const channelLabel = item.channelName || `渠道 ${item.channelId}`;
     const isChanged = source !== target;
-    const isSelected = selectedMappingSources.has(source);
+    const isSelected = selectedMappingSources.has(compositeKey);
     console.log(`📝 渲染模型: ${source} → ${target}`);
     return `
-      <tr data-source="${source}" class="mapping-row ${isChanged ? 'changed' : ''} ${isSelected ? 'selected' : ''}">
+      <tr data-source="${compositeKey}" class="mapping-row ${isChanged ? 'changed' : ''} ${isSelected ? 'selected' : ''}">
         <td class="select-cell">
-          <input type="checkbox" class="mapping-select" data-source="${source}" ${isSelected ? 'checked' : ''}>
+          <input type="checkbox" class="mapping-select" data-source="${compositeKey}" ${isSelected ? 'checked' : ''}>
         </td>
         <td class="source-model">
           <div class="model-text">${source}</div>
@@ -669,11 +669,11 @@ export const renderMappingTable = () => {
           <i class="fas fa-arrow-right"></i>
         </td>
         <td class="target-model">
-          <input type="text" value="${target}" data-source="${source}"
-            class="mapping-input" onchange="window.mappingModule.updateMapping('${source}', this.value)">
+          <input type="text" value="${target}" data-source="${compositeKey}"
+            class="mapping-input" onchange="window.mappingModule.updateMapping('${compositeKey}', this.value)">
         </td>
         <td class="action-cell">
-          <button class="btn-icon delete-btn" onclick="window.mappingModule.deleteMapping('${source}')">
+          <button class="btn-icon delete-btn" onclick="window.mappingModule.deleteMapping('${compositeKey}')">
             <i class="fas fa-trash"></i>
           </button>
         </td>
@@ -689,15 +689,30 @@ export const renderMappingTable = () => {
 /**
  * 更新映射
  */
-export const updateMapping = (source, target) => {
-  if (!source || !target) {
+export const updateMapping = (compositeKey, target) => {
+  if (!compositeKey || !target) {
     notifications.error('映射源和目标不能为空');
     return false;
   }
 
-  state.mappings[source] = target;
+  // 解析复合键
+  const { channelId, model } = setOps.parseCompositeKey(compositeKey);
+  
+  // 更新映射
+  if (state.mappings[compositeKey]) {
+    state.mappings[compositeKey].targetModel = target;
+  } else {
+    state.mappings[compositeKey] = {
+      id: compositeKey,
+      channelId,
+      channelName: state.selectedModels.find(m => m.id === compositeKey)?.channelName || '',
+      model,
+      targetModel: target
+    };
+  }
+  
   saveMappingsToStorage();
-  updateMappingRowState(source, target);
+  updateMappingRowState(compositeKey, target);
   renderSelectedModels();
   applyMappingFilters();
   return true;
@@ -706,26 +721,37 @@ export const updateMapping = (source, target) => {
 /**
  * 添加映射（从一键更新页面添加）
  */
-export const addMapping = (source, target, channelInfo = null) => {
-  if (!source || !target) {
-    console.warn('添加映射失败：源或目标为空', { source, target });
+export const addMapping = (model, target, channelInfo = null) => {
+  if (!model || !target) {
+    console.warn('添加映射失败：源或目标为空', { model, target });
     return false;
   }
 
+  // 使用传入的 channelInfo 或从 state 中查找
+  const channelId = channelInfo?.id || state.currentChannelId;
+  const channelName = channelInfo?.name || state.channels.find(c => c.id == channelId)?.name || '';
+  
+  // 创建复合键
+  const compositeKey = setOps.createCompositeKey(channelId, model);
+
   // 更新 state
-  state.mappings[source] = target;
+  state.mappings[compositeKey] = {
+    id: compositeKey,
+    channelId,
+    channelName,
+    model,
+    targetModel: target
+  };
 
-  // 如果 source 不在 selectedModels 中，添加到 selectedModels
-  if (!state.selectedModels.includes(source)) {
-    state.selectedModels.push(source);
-  }
-
-  if (channelInfo && (channelInfo.id != null || channelInfo.name)) {
-    const existing = state.modelChannelMap[source] || {};
-    state.modelChannelMap[source] = {
-      id: channelInfo.id != null ? channelInfo.id : existing.id,
-      name: channelInfo.name ? channelInfo.name : existing.name
-    };
+  // 如果不在 selectedModels 中，添加到 selectedModels
+  const exists = state.selectedModels.find(m => m.id === compositeKey);
+  if (!exists) {
+    state.selectedModels.push({
+      id: compositeKey,
+      channelId,
+      channelName,
+      model
+    });
   }
 
   // 保存到 localStorage
@@ -735,7 +761,7 @@ export const addMapping = (source, target, channelInfo = null) => {
   renderMappingTable();
   renderSelectedModels();
 
-  console.log(`✅ 添加映射成功: ${source} -> ${target}`);
+  console.log(`✅ 添加映射成功: ${model} -> ${target} (${compositeKey})`);
   return true;
 };
 
@@ -745,7 +771,6 @@ export const addMapping = (source, target, channelInfo = null) => {
 const saveMappingsToStorage = () => {
   try {
     localStorage.setItem(STORAGE_KEYS.MODEL_MAPPINGS, JSON.stringify(state.mappings));
-    localStorage.setItem('newapi-model-channel-map', JSON.stringify(state.modelChannelMap));
   } catch (error) {
     console.warn('保存映射失败:', error);
   }
@@ -754,17 +779,17 @@ const saveMappingsToStorage = () => {
 /**
  * 删除映射
  */
-export const deleteMapping = (source) => {
-  if (!source) return false;
+export const deleteMapping = (compositeKey) => {
+  if (!compositeKey) return false;
 
-  selectedMappingSources.delete(source);
-  delete state.mappings[source];
-  state.selectedModels = state.selectedModels.filter(m => m !== source);
+  selectedMappingSources.delete(compositeKey);
+  delete state.mappings[compositeKey];
+  state.selectedModels = state.selectedModels.filter(m => m.id !== compositeKey);
   saveMappingsToStorage();
   renderMappingTable();
   renderSelectedModels();
 
-  notifications.success(`已删除映射: ${source}`);
+  notifications.success(`已删除映射: ${compositeKey}`);
   return true;
 };
 
@@ -798,8 +823,7 @@ export const renderSelectedModels = () => {
     模型数量: models.length,
     模型列表: models,
     selectedModels: state.selectedModels,
-    mappings: state.mappings,
-    modelChannelMap: state.modelChannelMap
+    mappings: state.mappings
   });
 
   const countEl = $('selectedModelsCountMapping');
@@ -817,19 +841,18 @@ export const renderSelectedModels = () => {
     return;
   }
 
-  container.innerHTML = models.map(model => {
-    const channelInfo = state.modelChannelMap[model];
-    const channelName = (channelInfo && channelInfo.name) || '未知渠道';
-    const mappedName = state.mappings[model] || model;
+  container.innerHTML = models.map(item => {
+    const channelName = item.channelName || `渠道 ${item.channelId}`;
+    const mappedName = state.mappings[item.id]?.targetModel || item.model;
 
-    console.log(`📝 渲染模型: ${model}, 渠道: ${channelName}, 映射: ${mappedName}`);
+    console.log(`📝 渲染模型: ${item.model}, 渠道: ${channelName}, 映射: ${mappedName}`);
 
     return `
-      <div class="model-chip" data-model="${model}">
-        <span class="model-name" title="${model}">${model}</span>
+      <div class="model-chip" data-id="${item.id}" data-model="${item.model}">
+        <span class="model-name" title="${item.model}">${item.model}</span>
         <span class="model-channel">${channelName}</span>
         <span class="model-mapped">→ ${mappedName}</span>
-        <button class="remove-btn" data-model="${model}">
+        <button class="remove-btn" data-id="${item.id}" data-model="${item.model}">
           <i class="fas fa-times"></i>
         </button>
       </div>
@@ -839,8 +862,8 @@ export const renderSelectedModels = () => {
   container.querySelectorAll('.model-chip').forEach(chip => {
     chip.addEventListener('click', (e) => {
       if (e.target.closest('.remove-btn')) return;
-      const model = chip.dataset.model;
-      const found = scrollToMappingRow(model);
+      const compositeKey = chip.dataset.id;
+      const found = scrollToMappingRow(compositeKey);
       if (!found) {
         notifications.warning('未找到该模型的映射行');
       }
@@ -850,7 +873,9 @@ export const renderSelectedModels = () => {
   container.querySelectorAll('.remove-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      removeSelectedModel(btn.dataset.model);
+      const compositeKey = btn.dataset.id;
+      const model = btn.dataset.model;
+      removeSelectedModel(compositeKey, model);
     });
   });
 
@@ -860,11 +885,11 @@ export const renderSelectedModels = () => {
 /**
  * 移除已选模型
  */
-export const removeSelectedModel = (model) => {
-  selectedMappingSources.delete(model);
-  state.selectedModels = state.selectedModels.filter(m => m !== model);
-  delete state.mappings[model];
-  delete state.modelChannelMap[model];
+export const removeSelectedModel = (compositeKey, model) => {
+  if (!compositeKey) return;
+  selectedMappingSources.delete(compositeKey);
+  state.selectedModels = state.selectedModels.filter(m => m.id !== compositeKey);
+  delete state.mappings[compositeKey];
   saveMappingsToStorage();
   renderSelectedModels();
   renderMappingTable();
@@ -877,7 +902,6 @@ export const clearAllMappings = () => {
   selectedMappingSources.clear();
   state.selectedModels = [];
   state.mappings = {};
-  state.modelChannelMap = {};
   saveMappingsToStorage();
   renderSelectedModels();
   renderMappingTable();
@@ -892,8 +916,14 @@ export const restoreOriginalMappings = () => {
   const models = Array.isArray(state.selectedModels) ? [...state.selectedModels] : [];
   const nextMappings = {};
 
-  for (const model of models) {
-    nextMappings[model] = model;
+  for (const item of models) {
+    nextMappings[item.id] = {
+      id: item.id,
+      channelId: item.channelId,
+      channelName: item.channelName,
+      model: item.model,
+      targetModel: item.model
+    };
   }
 
   state.mappings = nextMappings;
@@ -915,11 +945,33 @@ export const importMappings = (mappingText) => {
     }
 
     let count = 0;
-    for (const [source, target] of Object.entries(mappings)) {
-      if (!state.selectedModels.includes(source)) {
-        state.selectedModels.push(source);
+    for (const [compositeKey, target] of Object.entries(mappings)) {
+      // 解析复合键
+      const { channelId, model } = setOps.parseCompositeKey(compositeKey);
+      
+      // 检查是否已存在
+      const exists = state.selectedModels.find(m => m.id === compositeKey);
+      if (!exists) {
+        state.selectedModels.push({
+          id: compositeKey,
+          channelId,
+          channelName: '',
+          model
+        });
       }
-      state.mappings[source] = target;
+      
+      // 更新映射
+      if (state.mappings[compositeKey]) {
+        state.mappings[compositeKey].targetModel = target;
+      } else {
+        state.mappings[compositeKey] = {
+          id: compositeKey,
+          channelId,
+          channelName: '',
+          model,
+          targetModel: target
+        };
+      }
       count++;
     }
 
@@ -952,7 +1004,6 @@ export const exportMappings = () => {
  */
 export const generateSmartMappings = () => {
   const options = getMappingOptions();
-  const mappings = {};
 
   // 获取选中的模型
   const models = setOps.getModelsArray();
@@ -963,8 +1014,8 @@ export const generateSmartMappings = () => {
   });
 
   // 生成映射
-  for (const model of models) {
-    let mappedModel = model;
+  for (const item of models) {
+    let mappedModel = item.model;
 
     // 应用智能名称匹配
     if (options.smartNameMatching) {
@@ -986,28 +1037,24 @@ export const generateSmartMappings = () => {
 
     // 应用自动渠道后缀
     if (options.autoChannelSuffix) {
-      const channelInfo = state.modelChannelMap[model];
-      if (channelInfo) {
-        const beforeSuffix = mappedModel;
-        mappedModel = applyAutoChannelSuffix(mappedModel, channelInfo);
-        if (beforeSuffix !== mappedModel) {
-          console.log(`🏷️ 渠道后缀: ${beforeSuffix} → ${mappedModel}`);
-        }
-      } else {
-        console.log(`⚠️ 未找到模型 ${model} 的渠道信息，跳过后缀添加`);
+      const beforeSuffix = mappedModel;
+      mappedModel = applyAutoChannelSuffix(mappedModel, { name: item.channelName });
+      if (beforeSuffix !== mappedModel) {
+        console.log(`🏷️ 渠道后缀: ${beforeSuffix} → ${mappedModel}`);
       }
     }
 
-    mappings[model] = mappedModel;
-  }
-
-  // 更新状态 - 确保同步到 state.mappings
-  Object.assign(state.mappings, mappings);
-
-  // 确保所有模型都在 selectedModels 数组中
-  for (const model of Object.keys(mappings)) {
-    if (!state.selectedModels.includes(model)) {
-      state.selectedModels.push(model);
+    // 更新 mappings
+    if (state.mappings[item.id]) {
+      state.mappings[item.id].targetModel = mappedModel;
+    } else {
+      state.mappings[item.id] = {
+        id: item.id,
+        channelId: item.channelId,
+        channelName: item.channelName,
+        model: item.model,
+        targetModel: mappedModel
+      };
     }
   }
 
@@ -1018,15 +1065,19 @@ export const generateSmartMappings = () => {
   renderMappingTable();
   renderSelectedModels();
 
-  const diffCount = Object.entries(mappings).filter(([k, v]) => k !== v).length;
-  notifications.success(`已生成 ${Object.keys(mappings).length} 个映射，${diffCount} 个已优化`);
+  const changedCount = models.filter(item => {
+    const target = state.mappings[item.id]?.targetModel || item.model;
+    return item.model !== target;
+  }).length;
+
+  notifications.success(`已生成 ${models.length} 个映射，${changedCount} 个已优化`);
 
   console.log('✅ 映射生成完成:', {
-    总数: Object.keys(mappings).length,
-    已优化: diffCount
+    总数: models.length,
+    已优化: changedCount
   });
 
-  return mappings;
+  return state.mappings;
 };
 
 /**
@@ -1054,11 +1105,11 @@ export const getMappingOptionsState = () => {
  * 获取映射统计
  */
 export const getMappingStats = () => {
-  const entries = Object.entries(state.mappings);
+  const entries = Object.values(state.mappings);
   return {
     total: entries.length,
-    unchanged: entries.filter(([s, t]) => s === t).length,
-    redirected: entries.filter(([s, t]) => s !== t).length
+    unchanged: entries.filter(m => m.model === m.targetModel).length,
+    redirected: entries.filter(m => m.model !== m.targetModel).length
   };
 };
 

@@ -221,6 +221,38 @@ input, textarea, select {
     background: var(--success);
 }
 
+.version-info {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: 12px;
+    color: var(--text-tertiary);
+    margin-top: var(--space-sm);
+}
+
+.update-badge {
+    background: var(--danger);
+    color: #fff;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    text-decoration: none;
+    animation: pulse 2s infinite;
+}
+
+.update-badge:hover {
+    background: #dc2626;
+}
+
+.update-badge.hidden {
+    display: none;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
 /* --- Main Content --- */
 .main-content {
     flex: 1;
