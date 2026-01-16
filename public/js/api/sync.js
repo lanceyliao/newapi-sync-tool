@@ -80,12 +80,20 @@ export const cancelOneClickUpdateJob = async (jobId) => {
 /**
  * 批量同步多个渠道
  */
-export const batchSync = async (config, channelMappings, onProgress) => {
+export const batchSync = async (config, channelMappings, mode = 'append', onProgress) => {
+  let updateMode = mode;
+  let progressCallback = onProgress;
+  if (typeof updateMode === 'function') {
+    progressCallback = updateMode;
+    updateMode = 'append';
+  }
+
   const results = {
     success: 0,
     failed: 0,
     unchanged: 0,
-    errors: []
+    errors: [],
+    logs: []
   };
 
   const total = channelMappings.length;
@@ -93,8 +101,8 @@ export const batchSync = async (config, channelMappings, onProgress) => {
   for (let i = 0; i < channelMappings.length; i++) {
     const { channelId, models, mapping } = channelMappings[i];
 
-    if (onProgress) {
-      onProgress({
+    if (progressCallback) {
+      progressCallback({
         current: i + 1,
         total,
         percent: Math.round(((i + 1) / total) * 100),
@@ -103,7 +111,7 @@ export const batchSync = async (config, channelMappings, onProgress) => {
     }
 
     try {
-      const result = await fetchSyncModels(mapping, 'append', [channelId]);
+      const result = await fetchSyncModels(mapping, updateMode, [channelId]);
       if (result.success) {
         if (result.stats) {
           results.success += result.stats.success || 0;
@@ -111,6 +119,9 @@ export const batchSync = async (config, channelMappings, onProgress) => {
           results.unchanged += result.stats.unchanged || 0;
         } else {
           results.success++;
+        }
+        if (Array.isArray(result.logs) && result.logs.length > 0) {
+          result.logs.forEach(log => results.logs.push(`[渠道 ${channelId}] ${log}`));
         }
       } else {
         results.failed++;

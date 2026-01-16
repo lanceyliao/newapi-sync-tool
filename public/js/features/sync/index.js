@@ -2,7 +2,7 @@
  * 同步功能模块
  */
 import { state, setOps } from '../../core/state.js';
-import { syncModels, batchSync, createCheckpoint, restoreCheckpoint } from '../../api/sync.js';
+import { batchSync, createCheckpoint, restoreCheckpoint } from '../../api/sync.js';
 import { $ } from '../../ui/dom.js';
 import { addLog, setProgress } from '../../ui/dom.js';
 import { notifications } from '../../ui/notifications.js';
@@ -78,12 +78,11 @@ export const startSync = async (mode = 'append') => {
     let selectedChannelIds = setOps.getChannelsArray();
 
     if (selectedChannelIds.length === 0) {
-      // 从 modelChannelMap 中提取选中模型对应的渠道ID
+      // 从 selectedModels 中提取选中模型对应的渠道ID
       const channelIdSet = new Set();
-      for (const model of Object.keys(state.mappings)) {
-        const channelInfo = state.modelChannelMap[model];
-        if (channelInfo && channelInfo.id != null) {
-          channelIdSet.add(channelInfo.id);
+      for (const item of state.selectedModels) {
+        if (item.channelId != null) {
+          channelIdSet.add(item.channelId);
         }
       }
       selectedChannelIds = Array.from(channelIdSet);
@@ -141,33 +140,82 @@ export const startSync = async (mode = 'append') => {
       return { success: false, message: '未找到关联渠道' };
     }
 
-    // 执行同步 - 传递选中的渠道 ID
-    // state.mappings 格式是 { 原始模型名: 新模型名 }
-    const result = await syncModels(state.config, state.mappings, mode, channelIds);
+    // 执行同步 - 按渠道拆分映射，避免跨渠道混用
+    // 前端发送格式: { 原始模型名: 新模型名 }
+    const channelIdSet = new Set(channelIds);
+    const channelMappingsMap = new Map();
 
-    if (result.success) {
-      progress.complete('progressFill', 'progressText', '同步完成!');
+    console.log('🔍 [前端] 开始构建分渠道 modelMapping');
+    console.log('🔍 [前端] 选中的渠道ID:', Array.from(channelIdSet));
+    console.log('🔍 [前端] state.mappings 条目数:', Object.keys(state.mappings).length);
 
-      // 记录结果
-      const stats = result.stats || {};
-      const successMsg = `✅ 同步成功: ${stats.success || 0} 个渠道已更新`;
-      const failedMsg = stats.failed > 0 ? `, ${stats.failed} 个失败` : '';
-      const unchangedMsg = stats.unchanged > 0 ? `, ${stats.unchanged} 个未变更` : '';
-
-      addLog('syncLogs', successMsg + failedMsg + unchangedMsg, 'success');
-
-      if (result.logs) {
-        result.logs.forEach(log => addLog('syncLogs', log));
+    for (const [compositeKey, mapping] of Object.entries(state.mappings)) {
+      console.log(`🔍 [前端] 检查映射: ${compositeKey}`, mapping);
+      if (!mapping || !mapping.model || mapping.channelId == null) {
+        continue;
       }
 
-      notifications.success('同步完成');
-      return { success: true, stats, logs: result.logs };
-    } else {
-      progress.fail('progressFill', 'progressText', '同步失败');
-      addLog('syncLogs', `❌ 同步失败: ${result.message}`, 'error');
-      notifications.error(`同步失败: ${result.message}`);
-      return { success: false, message: result.message };
+      if (!channelIdSet.has(mapping.channelId)) {
+        console.log(`⏭️ [前端] 跳过映射 (渠道不匹配): ${compositeKey}, 渠道ID ${mapping.channelId}`);
+        continue;
+      }
+
+      const originalModel = mapping.model;
+      const targetModel = mapping.targetModel || mapping.model;
+      let entry = channelMappingsMap.get(mapping.channelId);
+      if (!entry) {
+        entry = { channelId: mapping.channelId, mapping: {} };
+        channelMappingsMap.set(mapping.channelId, entry);
+      }
+      entry.mapping[originalModel] = targetModel;
+      console.log(`✅ [前端] 添加映射: ${originalModel} → ${targetModel} (渠道 ${mapping.channelId})`);
     }
+
+    const channelMappings = Array.from(channelMappingsMap.values())
+      .filter(item => Object.keys(item.mapping || {}).length > 0);
+
+    if (channelMappings.length === 0) {
+      addLog('syncLogs', `⚠️ 未找到可同步的映射`, 'warning');
+      progress.fail('progressFill', 'progressText', '无映射可同步');
+      notifications.warning('未找到可同步的映射');
+      return { success: false, message: '未找到可同步的映射' };
+    }
+
+    const result = await batchSync(
+      state.config,
+      channelMappings,
+      mode,
+      ({ current, total }) => {
+        const percent = 30 + Math.round((current / total) * 60);
+        progress.update('progressFill', 'progressText', percent, `正在同步... (${current}/${total})`);
+      }
+    );
+
+    const stats = {
+      success: result.success || 0,
+      failed: result.failed || 0,
+      unchanged: result.unchanged || 0
+    };
+
+    const hasFailures = stats.failed > 0;
+    const successMsg = `✅ 同步完成: 成功 ${stats.success || 0} 个渠道`;
+    const failedMsg = stats.failed > 0 ? `, 失败 ${stats.failed} 个` : '';
+    const unchangedMsg = stats.unchanged > 0 ? `, 未变更 ${stats.unchanged} 个` : '';
+    addLog('syncLogs', successMsg + failedMsg + unchangedMsg, hasFailures ? 'warning' : 'success');
+
+    if (result.logs) {
+      result.logs.forEach(log => addLog('syncLogs', log));
+    }
+
+    if (hasFailures) {
+      progress.fail('progressFill', 'progressText', stats.success > 0 ? '部分完成' : '同步失败');
+      notifications.warning('同步完成（部分失败）');
+      return { success: false, stats, logs: result.logs };
+    }
+
+    progress.complete('progressFill', 'progressText', '同步完成!');
+    notifications.success('同步完成');
+    return { success: true, stats, logs: result.logs };
   } catch (error) {
     progress.fail('progressFill', 'progressText', '同步失败');
     addLog('syncLogs', `❌ 同步失败: ${error.message}`, 'error');
