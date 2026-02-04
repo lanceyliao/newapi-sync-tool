@@ -70,4 +70,7 @@ General steps:
 Do not commit `node_modules/`, `config.json`, or `monitor-config.json`.
 
 
-## MIT
+## License
+
+This project is licensed under the MIT License.
+
