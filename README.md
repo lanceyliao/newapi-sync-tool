@@ -72,5 +72,5 @@ Do not commit `node_modules/`, `config.json`, or `monitor-config.json`.
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the [MIT](https://github.com/ZiChuanShanFeng/newapi-sync-tool/blob/main/License.md) License.
 
