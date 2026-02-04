@@ -5,6 +5,9 @@
 
 NewAPI Sync Tool (Node.js + Express).
 
+## DEMO
+[Frontend Demo](https://testnewapi.zeabur.app/#)
+
 ## TOKEN
 The access token can be obtained from Personal Settings - Security Settings - System Service Token.
 
