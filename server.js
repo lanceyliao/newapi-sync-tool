@@ -361,7 +361,15 @@ app.post('/api/channels', async (req, res) => {
     const pageSize = 500;
     const firstPageResult = await client.getChannels(1, pageSize);
 
-    if (!firstPageResult || !firstPageResult.success) {
+    if (!firstPageResult || typeof firstPageResult !== 'object') {
+      return res.status(502).json({
+        success: false,
+        message: '获取渠道失败：上游返回空结果',
+        error: 'EMPTY_CHANNELS_FIRST_PAGE'
+      });
+    }
+
+    if (!firstPageResult.success) {
       return res.json(firstPageResult);
     }
 
@@ -373,7 +381,14 @@ app.post('/api/channels', async (req, res) => {
     const allChannels = [...firstPageData];
     for (let page = 2; page <= totalPages; page += 1) {
       const pageResult = await client.getChannels(page, pageSize);
-      if (!pageResult || !pageResult.success) {
+      if (!pageResult || typeof pageResult !== 'object') {
+        return res.status(502).json({
+          success: false,
+          message: `获取渠道失败：第 ${page} 页返回空结果`,
+          error: 'EMPTY_CHANNELS_PAGE'
+        });
+      }
+      if (!pageResult.success) {
         return res.json(pageResult);
       }
       if (Array.isArray(pageResult.data) && pageResult.data.length > 0) {
