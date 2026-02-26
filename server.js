@@ -356,9 +356,53 @@ app.post('/api/channels', async (req, res) => {
     if (!baseUrl || !token || !userId) {
       return res.status(400).json({ success: false, message: '请填写完整的配置信息' });
     }
+
     const client = new NewAPIClient({ baseUrl, token, userId, authHeaderType });
-    const result = await client.getChannels();
-    res.json(result);
+    const pageSize = 500;
+    const firstPageResult = await client.getChannels(1, pageSize);
+
+    if (!firstPageResult || !firstPageResult.success) {
+      return res.json(firstPageResult);
+    }
+
+    const firstPageData = Array.isArray(firstPageResult.data) ? firstPageResult.data : [];
+    const reportedTotal = Number(firstPageResult.total) || firstPageData.length;
+    const firstPageCount = firstPageData.length;
+    const totalPages = firstPageCount > 0 ? Math.max(1, Math.ceil(reportedTotal / firstPageCount)) : 1;
+
+    const allChannels = [...firstPageData];
+    for (let page = 2; page <= totalPages; page += 1) {
+      const pageResult = await client.getChannels(page, pageSize);
+      if (!pageResult || !pageResult.success) {
+        return res.json(pageResult);
+      }
+      if (Array.isArray(pageResult.data) && pageResult.data.length > 0) {
+        allChannels.push(...pageResult.data);
+      }
+    }
+
+    const seenIds = new Set();
+    const dedupedChannels = [];
+    for (const channel of allChannels) {
+      const id = channel && channel.id;
+      if (id === undefined || id === null) {
+        dedupedChannels.push(channel);
+        continue;
+      }
+      const idKey = String(id);
+      if (seenIds.has(idKey)) {
+        continue;
+      }
+      seenIds.add(idKey);
+      dedupedChannels.push(channel);
+    }
+
+    res.json({
+      success: true,
+      data: dedupedChannels,
+      total: dedupedChannels.length,
+      page: 1
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: '获取渠道失败', error: error.message });
   }
