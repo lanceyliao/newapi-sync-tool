@@ -32,7 +32,30 @@ export async function request(endpoint, data = null, method = 'POST') {
   }
 
   const res = await fetch(url, opts);
-  return res.json();
+  const rawText = await res.text();
+
+  if (!rawText || !rawText.trim()) {
+    return {
+      success: false,
+      message: '服务端返回空响应体',
+      error: 'EMPTY_RESPONSE_BODY',
+      status: res.status,
+      statusText: res.statusText
+    };
+  }
+
+  try {
+    return JSON.parse(rawText);
+  } catch (error) {
+    return {
+      success: false,
+      message: '服务端返回了非 JSON 响应',
+      error: 'INVALID_JSON_RESPONSE',
+      status: res.status,
+      statusText: res.statusText,
+      raw: rawText
+    };
+  }
 }
 
 // ==================== 配置相关 ====================
